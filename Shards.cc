@@ -158,7 +158,7 @@ local LucideIcons = {
     ["refresh-cw"]      = "rbxassetid://10734933222",
     ["search"]          = "rbxassetid://10734943674",
     ["check"]           = "rbxassetid://10709790644",
-    ["x"]               = "rbxassetid://10747384394",
+    ["x"]               = "rbxassetid://10747383819",
     ["chevron-down"]    = "rbxassetid://10709790948",
     ["chevron-up"]      = "rbxassetid://10709791523",
     ["chevron-right"]   = "rbxassetid://10709791437",
@@ -273,6 +273,21 @@ function Library:GetTextBounds(text, baseSize, maxVec, isBold)
         return TextService:GetTextSize(tostring(text or ""), scaledSize, targetFont, maxVec or Vector2.new(500, 200))
     end)
     return ok and res or Vector2.new(#tostring(text or "") * 7, scaledSize + 2)
+end
+
+function Library:PruneRegistries()
+    for i = #self.TextObjects, 1, -1 do
+        local entry = self.TextObjects[i]
+        if not entry.Instance or not entry.Instance.Parent then
+            table.remove(self.TextObjects, i)
+        end
+    end
+    for i = #self.ThemeObjects, 1, -1 do
+        local entry = self.ThemeObjects[i]
+        if not entry.Instance or not entry.Instance.Parent then
+            table.remove(self.ThemeObjects, i)
+        end
+    end
 end
 
 function Library:RefreshAllText()
@@ -486,7 +501,7 @@ function Library:CreateAccentBar(parent, zIndex)
     return bar, grad
 end
 
-function Library:MakeDraggable(dragHandle, targetFrame, hudId)
+function Library:MakeDraggable(dragHandle, targetFrame, hudId, onMoveCallback)
     if hudId or (targetFrame and targetFrame.Name and targetFrame.Name ~= "") then
         self.HUDFrames[hudId or targetFrame.Name] = targetFrame
     end
@@ -505,13 +520,17 @@ function Library:MakeDraggable(dragHandle, targetFrame, hudId)
     self:Connect(UserInputService.InputChanged, function(input)
         if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
             local delta = input.Position - dragStart
+            local nextPos = UDim2.new(
+                startPos.X.Scale,
+                startPos.X.Offset + delta.X,
+                startPos.Y.Scale,
+                startPos.Y.Offset + delta.Y
+            )
+            if onMoveCallback then
+                onMoveCallback(nextPos)
+            end
             Library:Tween(targetFrame, TweenInfo.new(0.06, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-                Position = UDim2.new(
-                    startPos.X.Scale,
-                    startPos.X.Offset + delta.X,
-                    startPos.Y.Scale,
-                    startPos.Y.Offset + delta.Y
-                )
+                Position = nextPos
             })
         end
     end)
@@ -530,7 +549,8 @@ function Library:RefreshAttachmentTray(tray)
     for _, ch in ipairs(tray:GetChildren()) do
         if ch:IsA("GuiObject") and ch.Visible then
             visibleCount += 1
-            totalW += ch.Size.X.Offset
+            local targetW = ch:GetAttribute("TargetWidth")
+            totalW += (type(targetW) == "number" and targetW or ch.Size.X.Offset)
         end
     end
     totalW += math.max(0, visibleCount - 1) * 5
@@ -548,6 +568,13 @@ function Library:RefreshAttachmentTray(tray)
         if clickBtn and clickBtn.Name ~= "ColorSwatch" and clickBtn.Name ~= "KeybindBtn" then
             clickBtn.Size = UDim2.new(1, -rightPad, 1, 0)
         end
+    end
+end
+
+function Library:SyncOptionValue(flag, value)
+    local opt = self.Options[flag]
+    if opt and opt.Value ~= value and opt.Set then
+        opt:Set(value)
     end
 end
 
@@ -669,15 +696,22 @@ Library:BindTheme(TooltipLabel, "TextColor3", "Text")
 
 function Library:AddTooltip(target, text)
     if not text or text == "" then return end
+    local function ClampTooltipPos(mx, my, w, h)
+        local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1920, 1080)
+        local px = math.clamp(mx + 14, 6, math.max(6, vp.X - w - 6))
+        local py = math.clamp(my + 14, 6, math.max(6, vp.Y - h - 6))
+        return UDim2.fromOffset(px, py)
+    end
     self:Connect(target.MouseEnter, function()
         local bounds = self:GetTextBounds(text, 12, Vector2.new(500, 100))
+        local targetW = bounds.X + 18
         TooltipLabel.Text = text
         local pos = UserInputService:GetMouseLocation()
-        TooltipFrame.Position = UDim2.fromOffset(pos.X + 14, pos.Y + 14)
-        TooltipFrame.Size = UDim2.fromOffset(math.max(18, math.floor((bounds.X + 18) * 0.85)), 22)
+        TooltipFrame.Position = ClampTooltipPos(pos.X, pos.Y, targetW, 22)
+        TooltipFrame.Size = UDim2.fromOffset(math.max(18, math.floor(targetW * 0.85)), 22)
         TooltipFrame.Visible = true
         Library:Tween(TooltipFrame, TweenFast, {
-            Size = UDim2.fromOffset(bounds.X + 18, 22),
+            Size = UDim2.fromOffset(targetW, 22),
         })
     end)
     self:Connect(target.MouseLeave, function()
@@ -688,8 +722,12 @@ end
 Library:Connect(UserInputService.InputChanged, function(input)
     if TooltipFrame.Visible and input.UserInputType == Enum.UserInputType.MouseMovement then
         local pos = UserInputService:GetMouseLocation()
+        local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1920, 1080)
+        local w = TooltipFrame.AbsoluteSize.X
+        local px = math.clamp(pos.X + 14, 6, math.max(6, vp.X - w - 6))
+        local py = math.clamp(pos.Y + 14, 6, math.max(6, vp.Y - 28))
         Library:Tween(TooltipFrame, TweenInfo.new(0.05, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-            Position = UDim2.fromOffset(pos.X + 14, pos.Y + 14)
+            Position = UDim2.fromOffset(px, py)
         })
     end
 end)
@@ -1072,7 +1110,9 @@ function Library:CreateWatermark(customTitle)
 
     local wmObj = { Frame = wmFrame }
     function wmObj:SetVisible(v)
-        wmFrame.Visible = v
+        local state = (v == true)
+        wmFrame.Visible = state
+        Library:SyncOptionValue("UI_ShowWatermark", state)
     end
     function wmObj:SetTitle(newTitle)
         baseName = tostring(newTitle or Library.Title)
@@ -1247,7 +1287,9 @@ function Library:CreateKeybindList()
     end
 
     function kbObj:SetVisible(v)
-        kbFrame.Visible = v
+        local state = (v == true)
+        kbFrame.Visible = state
+        Library:SyncOptionValue("UI_ShowKeybinds", state)
     end
 
     self.KeybindList = kbObj
@@ -1349,8 +1391,12 @@ function Library:CreateSpectatorList()
                 if plr ~= LocalPlayer then
                     local isWatching = false
                     pcall(function()
-                        if cam and myHum and plr:DistanceFromCharacter(myChar:GetPivot().Position) < 4 and not plr.Character then
-                            isWatching = true
+                        if cam and myHum and myChar and not plr.Character then
+                            local dist = plr:DistanceFromCharacter(myChar:GetPivot().Position)
+                            -- Note: Roblox returns 0 when a player has no character; only non-zero < 4 indicates a replicated camera focus near us
+                            if dist > 0 and dist < 4 then
+                                isWatching = true
+                            end
                         end
                     end)
                     if isWatching then
@@ -1451,8 +1497,23 @@ function Library:CreateSpectatorList()
     end
 
     function specObj:SetVisible(v)
-        specFrame.Visible = (v == true)
+        local state = (v == true)
+        specFrame.Visible = state
+        if state then
+            specObj:Refresh()
+        end
+        Library:SyncOptionValue("UI_ShowSpectators", state)
     end
+
+    local specAccum = 0
+    self:Connect(RunService.Heartbeat, function(dt)
+        if not specFrame.Visible or self.Unloaded then return end
+        specAccum += dt
+        if specAccum >= 1.0 then
+            specAccum = 0
+            specObj:Refresh()
+        end
+    end)
 
     specObj:Refresh()
     self.SpectatorList = specObj
@@ -1619,8 +1680,15 @@ function Library:CreateTargetHUD()
         local flags = tostring(info.Flags or (Library.Flags["Rage_DT"] and "LC // DT" or "RESOLVE"))
         local ratio = math.clamp(hp / maxHp, 0, 1)
 
-        if info.UserId then
-            avatarImg.Image = "rbxthumb://type=AvatarHeadShot&id=" .. tostring(info.UserId) .. "&w=150&h=150"
+        local userId = info.UserId
+        if not userId then
+            local foundPlr = Players:FindFirstChild(tName)
+            if foundPlr then
+                userId = foundPlr.UserId
+            end
+        end
+        if userId then
+            avatarImg.Image = "rbxthumb://type=AvatarHeadShot&id=" .. tostring(userId) .. "&w=150&h=150"
         end
         nameLbl.Text = tName .. " [LOCKED]"
         flagBadge.Text = flags
@@ -1667,7 +1735,9 @@ function Library:CreateTargetHUD()
     end
 
     function hudObj:SetVisible(v)
-        hudFrame.Visible = (v == true)
+        local state = (v == true)
+        hudFrame.Visible = state
+        Library:SyncOptionValue("UI_ShowTargetHUD", state)
     end
 
     self.TargetHUD = hudObj
@@ -1904,10 +1974,13 @@ function Library:CreateIndicators()
     end
 
     function indObj:SetVisible(v)
-        indFrame.Visible = (v == true)
-        if indFrame.Visible then
+        local state = (v == true)
+        indFrame.Visible = state
+        if state then
             indObj:Refresh()
         end
+        Library:SyncOptionValue("UI_ShowIndicators", state)
+        Library:SyncOptionValue("Misc_ShowIndicators", state)
     end
 
     indObj:Refresh()
@@ -2152,7 +2225,10 @@ function Library:CreateRadar(cfg)
 
     local radarObj = { Frame = radarFrame }
     function radarObj:SetVisible(v)
-        radarFrame.Visible = (v == true)
+        local state = (v == true)
+        radarFrame.Visible = state
+        Library:SyncOptionValue("UI_ShowRadar", state)
+        Library:SyncOptionValue("Misc_ShowRadar", state)
     end
     function radarObj:SetRange(studs)
         radarRange = math.max(25, tonumber(studs) or 180)
@@ -2202,9 +2278,13 @@ function Library:CreateWorldController()
     local origOutdoor = lighting.OutdoorAmbient
     local origExposure = lighting.ExposureCompensation
     local nightApplied = false
+    local tpApplied = false
+    local origMinZoom = LocalPlayer and LocalPlayer.CameraMinZoomDistance or 0.5
+    local origMaxZoom = LocalPlayer and LocalPlayer.CameraMaxZoomDistance or 128
 
     local cards = {}
     local trackedHealth = {}
+    local playerConns = {}
 
     local function GetOrMakeCard(plr)
         local c = cards[plr]
@@ -2295,12 +2375,31 @@ function Library:CreateWorldController()
         return c
     end
 
+    local function DisconnectPlayerConns(plr)
+        local list = playerConns[plr]
+        if list then
+            for _, conn in ipairs(list) do
+                pcall(function() conn:Disconnect() end)
+            end
+            playerConns[plr] = nil
+        end
+    end
+
     local function HookCharacterHealth(plr, char)
-        if not char then return end
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if not hum then return end
+        if not char or self.Unloaded then return end
+        local hum = char:FindFirstChildOfClass("Humanoid") or char:WaitForChild("Humanoid", 3)
+        if not hum or self.Unloaded then return end
         trackedHealth[plr] = hum.Health
-        self:Connect(hum.HealthChanged, function(newHp)
+        local list = playerConns[plr]
+        if not list then
+            list = {}
+            playerConns[plr] = list
+        end
+        if list.HealthConn then
+            pcall(function() list.HealthConn:Disconnect() end)
+        end
+        list.HealthConn = hum.HealthChanged:Connect(function(newHp)
+            if self.Unloaded then return end
             local oldHp = trackedHealth[plr] or hum.MaxHealth
             trackedHealth[plr] = newHp
             local diff = math.floor((oldHp - newHp) + 0.5)
@@ -2323,24 +2422,29 @@ function Library:CreateWorldController()
                 end
             end
         end)
+        table.insert(list, list.HealthConn)
     end
 
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr ~= LocalPlayer then
-            if plr.Character then HookCharacterHealth(plr, plr.Character) end
-            self:Connect(plr.CharacterAdded, function(ch)
-                task.wait(0.2)
-                HookCharacterHealth(plr, ch)
-            end)
+    local function TrackPlayer(plr)
+        if plr == LocalPlayer then return end
+        DisconnectPlayerConns(plr)
+        playerConns[plr] = {}
+        if plr.Character then
+            task.spawn(HookCharacterHealth, plr, plr.Character)
         end
-    end
-    self:Connect(Players.PlayerAdded, function(plr)
-        self:Connect(plr.CharacterAdded, function(ch)
+        local charConn = plr.CharacterAdded:Connect(function(ch)
             task.wait(0.2)
             HookCharacterHealth(plr, ch)
         end)
-    end)
+        table.insert(playerConns[plr], charConn)
+    end
+
+    for _, plr in ipairs(Players:GetPlayers()) do
+        TrackPlayer(plr)
+    end
+    self:Connect(Players.PlayerAdded, TrackPlayer)
     self:Connect(Players.PlayerRemoving, function(plr)
+        DisconnectPlayerConns(plr)
         local c = cards[plr]
         if c then
             if c.Root then c.Root:Destroy() end
@@ -2356,19 +2460,18 @@ function Library:CreateWorldController()
         local cam = workspace.CurrentCamera
         if not cam then return end
 
-        -- 1) FOV Circle
+        -- 1) FOV Circle (ScreenGui has IgnoreGuiInset = true, so GetMouseLocation() is already in ScreenGui space)
         local showFov = (F["Rage_Enabled"] == true) or (F["Legit_Enable"] == true)
         fovCircle.Visible = showFov
         if showFov then
             local mPos = UserInputService:GetMouseLocation()
-            local insetY = self:GetGuiInsetY()
             local radius = F["Legit_Enable"] and ((tonumber(F["Legit_FOV"]) or 4.5) * 12) or ((tonumber(F["Rage_FOV"]) or 90) * 1.6)
             local d = math.clamp(radius * 2, 24, 700)
-            fovCircle.Position = UDim2.fromOffset(mPos.X, mPos.Y - insetY)
+            fovCircle.Position = UDim2.fromOffset(mPos.X, mPos.Y)
             fovCircle.Size = UDim2.fromOffset(d, d)
         end
 
-        -- 2) World Nightmode & Camera Overrides
+        -- 2) World Nightmode & Thirdperson Camera Overrides
         if F["World_Night"] then
             nightApplied = true
             local tint = F["World_Color"] or Color3.fromRGB(28, 28, 38)
@@ -2382,14 +2485,32 @@ function Library:CreateWorldController()
             lighting.ExposureCompensation = origExposure
         end
 
+        if LocalPlayer then
+            if F["World_TP"] then
+                if not tpApplied then
+                    origMinZoom = LocalPlayer.CameraMinZoomDistance
+                    origMaxZoom = LocalPlayer.CameraMaxZoomDistance
+                    tpApplied = true
+                end
+                local tpDist = math.clamp((tonumber(F["World_TPDist"]) or 115) * 0.2, 6, 120)
+                LocalPlayer.CameraMaxZoomDistance = tpDist
+                LocalPlayer.CameraMinZoomDistance = tpDist
+            elseif tpApplied then
+                tpApplied = false
+                LocalPlayer.CameraMinZoomDistance = origMinZoom
+                LocalPlayer.CameraMaxZoomDistance = origMaxZoom
+            end
+        end
+
         -- 3) 2D Player Overlays & Chams Highlights
-        local anyESP = F["ESP_Box"] or F["ESP_Name"] or F["ESP_Health"] or F["ESP_Weapon"] or F["Chams_Vis"] or F["Chams_XQZ"]
+        local anyESP = F["ESP_Box"] or F["ESP_Name"] or F["ESP_Health"] or F["ESP_Weapon"] or F["ESP_Glow"] or F["Chams_Vis"] or F["Chams_XQZ"]
         for _, plr in ipairs(Players:GetPlayers()) do
             if plr ~= LocalPlayer then
+                local isWhitelisted = (F["Misc_Whitelist"] == true) and (F["Misc_PlayerTarget"] == plr.Name)
                 local char = plr.Character
                 local hum = char and char:FindFirstChildOfClass("Humanoid")
                 local hrp = char and (char:FindFirstChild("HumanoidRootPart") or char.PrimaryPart)
-                if anyESP and char and hum and hrp and hum.Health > 0 then
+                if anyESP and not isWhitelisted and char and hum and hrp and hum.Health > 0 then
                     local c = GetOrMakeCard(plr)
                     local topPos, onScreenTop = cam:WorldToViewportPoint(hrp.Position + Vector3.new(0, 2.8, 0))
                     local botPos, onScreenBot = cam:WorldToViewportPoint(hrp.Position - Vector3.new(0, 3.2, 0))
@@ -2420,20 +2541,23 @@ function Library:CreateWorldController()
                         c.Root.Visible = false
                     end
 
-                    -- Highlight Chams
-                    if F["Chams_Vis"] or F["Chams_XQZ"] then
-                        if not c.Highlight or not c.Highlight.Parent then
+                    -- Highlight Chams & Glow Stencil
+                    local hasChams = F["Chams_Vis"] or F["Chams_XQZ"]
+                    if hasChams or F["ESP_Glow"] then
+                        if not c.Highlight or c.Highlight.Parent ~= char then
+                            if c.Highlight then pcall(function() c.Highlight:Destroy() end) end
                             local hl = Instance.new("Highlight")
                             hl.Name = "ShardsChams"
                             hl.Parent = char
                             c.Highlight = hl
                         end
                         c.Highlight.Enabled = true
-                        c.Highlight.DepthMode = F["Chams_XQZ"] and Enum.HighlightDepthMode.AlwaysOnTop or Enum.HighlightDepthMode.Occluded
+                        c.Highlight.DepthMode = (F["Chams_XQZ"] or F["ESP_Glow"]) and Enum.HighlightDepthMode.AlwaysOnTop or Enum.HighlightDepthMode.Occluded
                         c.Highlight.FillColor = F["Chams_Vis"] and (F["Chams_VisCol"] or self.Theme.Accent) or (F["Chams_XQZCol"] or self.Theme.Accent)
                         c.Highlight.OutlineColor = F["ESP_GlowColor"] or Color3.new(0, 0, 0)
-                        c.Highlight.FillTransparency = 0.45
-                        c.Highlight.OutlineTransparency = F["ESP_Glow"] and 0.1 or 1
+                        c.Highlight.FillTransparency = hasChams and 0.45 or 1
+                        local glowAlpha = self.Options["ESP_GlowColor"] and self.Options["ESP_GlowColor"].Alpha or 0.1
+                        c.Highlight.OutlineTransparency = F["ESP_Glow"] and math.clamp(glowAlpha, 0, 0.95) or 1
                     elseif c.Highlight then
                         c.Highlight.Enabled = false
                     end
@@ -2448,7 +2572,31 @@ function Library:CreateWorldController()
         end
     end)
 
-    self.WorldController = { Folder = overlayFolder }
+    self.WorldController = {
+        Folder = overlayFolder,
+        Cleanup = function()
+            for plr in pairs(playerConns) do
+                DisconnectPlayerConns(plr)
+            end
+            for _, c in pairs(cards) do
+                if c.Highlight then
+                    pcall(function() c.Highlight:Destroy() end)
+                end
+            end
+            table.clear(cards)
+            if nightApplied then
+                nightApplied = false
+                lighting.Ambient = origAmbient
+                lighting.OutdoorAmbient = origOutdoor
+                lighting.ExposureCompensation = origExposure
+            end
+            if tpApplied and LocalPlayer then
+                tpApplied = false
+                LocalPlayer.CameraMinZoomDistance = origMinZoom
+                LocalPlayer.CameraMaxZoomDistance = origMaxZoom
+            end
+        end,
+    }
     return self.WorldController
 end
 
@@ -2522,9 +2670,12 @@ function Library:CreateKeybindAttachment(parentRow, cfg, toggleLink)
         local txt = binding and "[...]" or ("[" .. self:FormatKey(currentKey) .. "]")
         btn.Text = txt
         local b = self:GetTextBounds(txt, 11, Vector2.new(200, 20))
+        local targetW = math.max(36, b.X + 10)
+        btn:SetAttribute("TargetWidth", targetW)
         Library:Tween(btn, TweenFast, {
-            Size = UDim2.fromOffset(math.max(36, b.X + 10), 15),
+            Size = UDim2.fromOffset(targetW, 15),
         })
+        Library:RefreshAttachmentTray(parentRow)
     end
     UpdateButtonSize()
     table.insert(self.LayoutRefreshers, UpdateButtonSize)
@@ -2649,6 +2800,14 @@ function Library:CreateKeybindAttachment(parentRow, cfg, toggleLink)
         end
         if mode == "Always" then
             Keybind.Active = true
+            if toggleLink and not toggleLink.Value then
+                toggleLink:Set(true)
+            end
+        elseif mode == "Hold" then
+            Keybind.Active = false
+            if toggleLink and toggleLink.Value then
+                toggleLink:Set(false)
+            end
         end
         SyncKeybindList()
     end
@@ -2710,6 +2869,7 @@ function Library:CreateKeybindAttachment(parentRow, cfg, toggleLink)
             if input.UserInputType == Enum.UserInputType.Keyboard then
                 if input.KeyCode == Enum.KeyCode.Unknown then return end
                 binding = false
+                self._justBoundTick = os.clock()
                 Library:Tween(btnStroke, TweenFast, { Color = self.Theme.InnerBorder })
                 Library:Tween(btn, TweenFast, { TextColor3 = self.Theme.TextDim })
                 if input.KeyCode == Enum.KeyCode.Escape or input.KeyCode == Enum.KeyCode.Backspace then
@@ -2720,6 +2880,7 @@ function Library:CreateKeybindAttachment(parentRow, cfg, toggleLink)
             elseif input.UserInputType == Enum.UserInputType.MouseButton2
                 or input.UserInputType == Enum.UserInputType.MouseButton3 then
                 binding = false
+                self._justBoundTick = os.clock()
                 Library:Tween(btnStroke, TweenFast, { Color = self.Theme.InnerBorder })
                 Library:Tween(btn, TweenFast, { TextColor3 = self.Theme.TextDim })
                 Keybind:Set(input.UserInputType)
@@ -2727,7 +2888,9 @@ function Library:CreateKeybindAttachment(parentRow, cfg, toggleLink)
             return
         end
 
-        if gpe or currentKey == Enum.KeyCode.Unknown then return end
+        if currentKey == Enum.KeyCode.Unknown then return end
+        if UserInputService:GetFocusedTextBox() ~= nil then return end
+        if gpe and input.UserInputType == Enum.UserInputType.Keyboard then return end
         local matched = (input.KeyCode == currentKey) or (input.UserInputType == currentKey)
         if matched then
             if mode == "Toggle" then
@@ -2929,7 +3092,7 @@ function Library:CreateColorPickerAttachment(parentRow, cfg)
     })
     self:Create("UIStroke", { Color = Color3.new(0, 0, 0), Thickness = 1, Parent = hueCursor })
 
-    -- Alpha Slider Bar
+    -- Alpha Slider Bar (Left = Transparent/Dark, Right = Opaque/Full Color so Alpha=0 starts on the right)
     local alphaBar = self:Create("TextButton", {
         BackgroundColor3 = defaultColor,
         AutoButtonColor = false,
@@ -2942,8 +3105,8 @@ function Library:CreateColorPickerAttachment(parentRow, cfg)
     self:ApplyCSBorder(alphaBar, "InnerBorder")
     self:Create("UIGradient", {
         Color = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.new(1, 1, 1)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(18, 18, 22)),
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(18, 18, 22)),
+            ColorSequenceKeypoint.new(1, Color3.new(1, 1, 1)),
         }),
         Parent = alphaBar,
     })
@@ -3052,12 +3215,17 @@ function Library:CreateColorPickerAttachment(parentRow, cfg)
         ColorPicker.Changed:Fire(col, alpha)
     end
 
-    function ColorPicker:Set(col, newAlpha)
+    function ColorPicker:Set(col, newAlpha, newRainbow)
         if typeof(col) == "Color3" then
             h, s, v = Color3.toHSV(col)
         end
         if type(newAlpha) == "number" then
             alpha = math.clamp(newAlpha, 0, 1)
+        end
+        if type(newRainbow) == "boolean" then
+            rainbow = newRainbow
+            ColorPicker.Rainbow = rainbow
+            rbBtn.TextColor3 = rainbow and Library.Theme.Accent or Library.Theme.TextDim
         end
         ApplyColor()
     end
@@ -3074,6 +3242,11 @@ function Library:CreateColorPickerAttachment(parentRow, cfg)
     self:Connect(hueBar.InputBegan, function(inp)
         if inp.UserInputType == Enum.UserInputType.MouseButton1 then
             dragHue = true
+            if rainbow then
+                rainbow = false
+                ColorPicker.Rainbow = false
+                rbBtn.TextColor3 = self.Theme.TextDim
+            end
             h = math.clamp((inp.Position.Y - hueBar.AbsolutePosition.Y) / hueBar.AbsoluteSize.Y, 0, 1)
             ApplyColor()
         end
@@ -3113,7 +3286,7 @@ function Library:CreateColorPickerAttachment(parentRow, cfg)
             local g = tonumber(string.sub(clean, 3, 4), 16)
             local b = tonumber(string.sub(clean, 5, 6), 16)
             if r and g and b then
-                ColorPicker:Set(Color3.fromRGB(r, g, b), alpha)
+                ColorPicker:Set(Color3.fromRGB(r, g, b), alpha, false)
             end
         end
     end)
@@ -3182,6 +3355,22 @@ function Library:CreateColorPickerAttachment(parentRow, cfg)
         end
     end)
 
+    local function CalcPopupCoords()
+        local abs = swatch.AbsolutePosition
+        local insetY = self:GetGuiInsetY()
+        local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1920, 1080)
+        local px = math.clamp(abs.X - 185, 6, math.max(6, vp.X - 225))
+        local py = math.clamp(abs.Y + insetY + 18, 6, math.max(6, vp.Y - 246))
+        return px, py
+    end
+
+    self:Connect(swatch:GetPropertyChangedSignal("AbsolutePosition"), function()
+        if popup.Visible then
+            local px, py = CalcPopupCoords()
+            popup.Position = UDim2.fromOffset(px, py)
+        end
+    end)
+
     self:Connect(swatch.InputBegan, function(input)
         if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
         local willShow = not popupOpen
@@ -3189,11 +3378,7 @@ function Library:CreateColorPickerAttachment(parentRow, cfg)
         if willShow then
             popupOpen = true
             popupToken += 1
-            local abs = swatch.AbsolutePosition
-            local insetY = self:GetGuiInsetY()
-            local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1920, 1080)
-            local px = math.clamp(abs.X - 185, 6, math.max(6, vp.X - 225))
-            local py = math.clamp(abs.Y + insetY + 18, 6, math.max(6, vp.Y - 246))
+            local px, py = CalcPopupCoords()
             popup.Position = UDim2.fromOffset(px, py - 4)
             popup.Size = UDim2.fromOffset(215, 0)
             popup.Visible = true
@@ -3946,6 +4131,7 @@ function GroupboxMethods:AddDropdown(cfg)
         for _, ch in ipairs(scroll:GetChildren()) do
             if ch:IsA("TextButton") then ch:Destroy() end
         end
+        Library:PruneRegistries()
 
         local shown = 0
         for _, optName in ipairs(values) do
@@ -4267,6 +4453,7 @@ function GroupboxMethods:AddListbox(cfg)
         for _, ch in ipairs(scroll:GetChildren()) do
             if ch:IsA("TextButton") then ch:Destroy() end
         end
+        Library:PruneRegistries()
         for _, item in ipairs(values) do
             local isSel = multi and (selected[item] == true) or (selected == item)
             local row = Library:Create("TextButton", {
@@ -4340,6 +4527,11 @@ function GroupboxMethods:AddListbox(cfg)
     function Listbox:Refresh(newValues)
         values = table.clone(newValues or {})
         Listbox.Values = values
+        if not multi and selected ~= nil and not table.find(values, selected) then
+            selected = values[1]
+            Listbox.Value = selected
+            Library.Flags[flag] = selected
+        end
         Rebuild()
     end
 
@@ -4735,6 +4927,7 @@ function GroupboxMethods:AddLabel(textOrCfg, wrapText)
         Parent = row,
     })
     Library:BindTheme(lbl, "TextColor3", "TextDim")
+    Library:RegisterSearchable(row, lbl, text)
 
     local attachTray = Library:Create("Frame", {
         Name = "AttachTray",
@@ -5130,7 +5323,9 @@ function Library:CreateWindow(cfg)
         Parent = main,
     })
     self:BindTheme(topBar, "BackgroundColor3", "Sidebar")
-    self:MakeDraggable(topBar, main)
+    self:MakeDraggable(topBar, main, "MainWindow", function(nextPos)
+        savedWinPos = nextPos
+    end)
 
     local topSep = self:Create("Frame", {
         BackgroundColor3 = self.Theme.InnerBorder,
@@ -5234,6 +5429,11 @@ function Library:CreateWindow(cfg)
         Parent = topBar,
     })
     self:BindTheme(rightBadge, "TextColor3", "TextMuted")
+    self.UpdateToggleKeyBadge = function()
+        if rightBadge and rightBadge.Parent then
+            rightBadge.Text = subTitle .. "  [" .. self:FormatKey(self.ToggleKey) .. "]"
+        end
+    end
 
     -- Left Vertical CS:GO Sidebar (Lucide Icon + Label Tabs)
     local sidebar = self:Create("Frame", {
@@ -5452,7 +5652,6 @@ function Library:CreateWindow(cfg)
             Library:Tween(main, TweenMedium, { Position = savedWinPos })
             Library:RefreshAllText()
         else
-            savedWinPos = main.Position
             Library:Tween(main, TweenFast, {
                 Position = UDim2.new(savedWinPos.X.Scale, savedWinPos.X.Offset, savedWinPos.Y.Scale, savedWinPos.Y.Offset + 6)
             })
@@ -5471,6 +5670,9 @@ function Library:CreateWindow(cfg)
 
     Library:Connect(UserInputService.InputBegan, function(input, gpe)
         if not gpe and input.KeyCode == self.ToggleKey then
+            if self._justBoundTick and (os.clock() - self._justBoundTick) < 0.08 then
+                return
+            end
             Window:Toggle()
         end
     end)
@@ -5633,6 +5835,7 @@ function Library:CreateWindow(cfg)
             end
             Window.ActiveTab = Tab
             page.Visible = true
+            UpdateCanvas()
             page.Position = UDim2.fromOffset(10, 16)
             Library:Tween(page, TweenMedium, { Position = UDim2.fromOffset(10, 10) })
             Library:Tween(tabBtn, TweenFast, {
@@ -6208,24 +6411,34 @@ end
 -- ============================================================================
 -- BUILT-IN SETTINGS, THEME & JSON CONFIG MANAGER BUILDER
 -- ============================================================================
-function Library:GetConfigJSON()
+function Library:GetConfigJSON(overrides)
     local data = {}
     for flag, opt in pairs(self.Options) do
-        if opt.Type == "Toggle" or opt.Type == "Slider" or opt.Type == "Input" or opt.Type == "Dropdown" or opt.Type == "Listbox" then
-            data[flag] = { Type = opt.Type, Value = opt.Value }
-        elseif opt.Type == "ColorPicker" then
-            local c = opt.Value
-            data[flag] = {
-                Type = "ColorPicker",
-                R = c.R, G = c.G, B = c.B,
-                Alpha = opt.Alpha,
-            }
-        elseif opt.Type == "Keybind" then
-            data[flag] = {
-                Type = "Keybind",
-                Key = typeof(opt.Value) == "EnumItem" and opt.Value.Name or tostring(opt.Value),
-                Mode = opt.Mode,
-            }
+        if flag ~= "UI_ConfigName" and flag ~= "UI_ConfigList" then
+            if opt.Type == "Toggle" or opt.Type == "Slider" or opt.Type == "Input" or opt.Type == "Dropdown" or opt.Type == "Listbox" then
+                data[flag] = { Type = opt.Type, Value = opt.Value }
+            elseif opt.Type == "ColorPicker" then
+                local c = opt.Value
+                data[flag] = {
+                    Type = "ColorPicker",
+                    R = c.R, G = c.G, B = c.B,
+                    Alpha = opt.Alpha,
+                    Rainbow = opt.Rainbow == true,
+                }
+            elseif opt.Type == "Keybind" then
+                data[flag] = {
+                    Type = "Keybind",
+                    Key = typeof(opt.Value) == "EnumItem" and opt.Value.Name or tostring(opt.Value),
+                    Mode = opt.Mode,
+                }
+            end
+        end
+    end
+    if type(overrides) == "table" then
+        for k, v in pairs(overrides) do
+            if data[k] and data[k].Type then
+                data[k].Value = v
+            end
         end
     end
     local hudPositions = {}
@@ -6255,27 +6468,31 @@ function Library:LoadConfigJSON(jsonStr)
     end
     if type(decoded["__HUDPositions"]) == "table" and type(decoded["__HUDPositions"].Positions) == "table" then
         for hudId, pos in pairs(decoded["__HUDPositions"].Positions) do
-            local frame = self.HUDFrames[hudId]
-            if frame and frame.Parent and type(pos) == "table" then
-                frame.Position = UDim2.new(pos.XS or 0, pos.XO or 0, pos.YS or 0, pos.YO or 0)
+            if hudId ~= "MainWindow" then
+                local frame = self.HUDFrames[hudId]
+                if frame and frame.Parent and type(pos) == "table" then
+                    frame.Position = UDim2.new(pos.XS or 0, pos.XO or 0, pos.YS or 0, pos.YO or 0)
+                end
             end
         end
     end
     for flag, entry in pairs(decoded) do
-        local opt = self.Options[flag]
-        if opt and type(entry) == "table" then
-            if entry.Type == "ColorPicker" and entry.R then
-                opt:Set(Color3.new(entry.R, entry.G, entry.B), entry.Alpha or 0)
-            elseif entry.Type == "Keybind" and entry.Key then
-                local kc = Enum.KeyCode.Unknown
-                pcall(function() kc = Enum.KeyCode[entry.Key] end)
-                if kc == Enum.KeyCode.Unknown then
-                    pcall(function() kc = Enum.UserInputType[entry.Key] end)
+        if flag ~= "UI_ConfigName" and flag ~= "UI_ConfigList" then
+            local opt = self.Options[flag]
+            if opt and type(entry) == "table" then
+                if entry.Type == "ColorPicker" and entry.R then
+                    opt:Set(Color3.new(entry.R, entry.G, entry.B), entry.Alpha or 0, entry.Rainbow == true)
+                elseif entry.Type == "Keybind" and entry.Key then
+                    local kc = Enum.KeyCode.Unknown
+                    pcall(function() kc = Enum.KeyCode[entry.Key] end)
+                    if kc == Enum.KeyCode.Unknown then
+                        pcall(function() kc = Enum.UserInputType[entry.Key] end)
+                    end
+                    opt:Set(kc)
+                    if entry.Mode then opt:SetMode(entry.Mode) end
+                elseif opt.Set then
+                    opt:Set(entry.Value)
                 end
-                opt:Set(kc)
-                if entry.Mode then opt:SetMode(entry.Mode) end
-            elseif opt.Set then
-                opt:Set(entry.Value)
             end
         end
     end
@@ -6346,13 +6563,15 @@ function Library:BuildConfigTab(tab)
         Flag = "UI_MenuKeybind",
         Default = self.ToggleKey,
         Callback = function(_, newKey)
-            if typeof(newKey) == "EnumItem" then
+            if typeof(newKey) == "EnumItem" and newKey.EnumType == Enum.KeyCode and newKey ~= Enum.KeyCode.Unknown then
                 self.ToggleKey = newKey
+                if self.UpdateToggleKeyBadge then self.UpdateToggleKeyBadge() end
             end
         end
     }).Changed:Connect(function(newKey)
         if typeof(newKey) == "EnumItem" and newKey.EnumType == Enum.KeyCode and newKey ~= Enum.KeyCode.Unknown then
             self.ToggleKey = newKey
+            if self.UpdateToggleKeyBadge then self.UpdateToggleKeyBadge() end
         end
     end)
 
@@ -6446,7 +6665,21 @@ function Library:BuildConfigTab(tab)
     local autoloadCfg = "none"
     local cfgNames = { "legit_default", "rage_hvh", "movement_bhop", "closet_main" }
     local savedMemoryConfigs = {
-        ["legit_default"] = self:GetConfigJSON()
+        ["legit_default"] = self:GetConfigJSON(),
+        ["rage_hvh"] = self:GetConfigJSON({
+            Rage_Enabled = true, Rage_Silent = true, Rage_AutoFire = true, Rage_Autowall = true,
+            Rage_Hitchance = 78, Rage_MinDmg = 55, Rage_DT = true, AA_Enabled = true, FL_Enable = true,
+            ESP_Box = true, ESP_Name = true, ESP_Health = true, Chams_Vis = true, Chams_XQZ = true,
+            UI_ShowWatermark = true, UI_ShowKeybinds = true, UI_ShowIndicators = true, Misc_ShowIndicators = true,
+        }),
+        ["movement_bhop"] = self:GetConfigJSON({
+            Misc_Bhop = true, Misc_Strafe = true, Misc_FastStop = true,
+            UI_ShowWatermark = true, UI_ShowKeybinds = true,
+        }),
+        ["closet_main"] = self:GetConfigJSON({
+            Legit_Enable = true, Legit_Smooth = 8.5, Legit_FOV = 3.5, Legit_RCS = true,
+            ESP_Box = true, ESP_Name = true, ESP_Health = true,
+        }),
     }
 
     pcall(function()
@@ -6471,13 +6704,14 @@ function Library:BuildConfigTab(tab)
 
     local autoStatusLbl = cfgGroup:AddLabel("Autoload Profile: " .. autoloadCfg)
 
-    cfgGroup:AddInput({
+    local cfgNameInput = cfgGroup:AddInput({
         Name = "Config Name",
         Flag = "UI_ConfigName",
         Default = "legit_default",
         Placeholder = "e.g. rage_semi",
         Callback = function(txt)
-            cfgName = txt ~= "" and txt or "default"
+            local trimmed = tostring(txt or ""):gsub("^%s*(.-)%s*$", "%1")
+            cfgName = trimmed
         end
     })
 
@@ -6489,6 +6723,10 @@ function Library:BuildConfigTab(tab)
         Default = "legit_default",
         Callback = function(val)
             selectedCfg = val
+            cfgName = val
+            if cfgNameInput then
+                cfgNameInput:Set(val)
+            end
         end
     })
 
@@ -6496,7 +6734,7 @@ function Library:BuildConfigTab(tab)
         Name = "Save Config",
         Icon = "save",
         Callback = function()
-            local target = cfgName ~= "" and cfgName or selectedCfg
+            local target = (cfgName and cfgName ~= "") and cfgName or selectedCfg or "legit_default"
             local json = self:GetConfigJSON()
             savedMemoryConfigs[target] = json
             pcall(function()
@@ -6509,6 +6747,8 @@ function Library:BuildConfigTab(tab)
                 table.insert(cfgList.Values, target)
                 cfgList:Refresh(cfgList.Values)
             end
+            selectedCfg = target
+            cfgList:Set(target)
             self:Notify({ Title = "Config Saved", Description = "Saved profile '" .. target .. "'.", Icon = "save" })
         end
     })
@@ -6535,7 +6775,7 @@ function Library:BuildConfigTab(tab)
         Name = "Set Autoload",
         Icon = "shield-check",
         Callback = function()
-            local target = selectedCfg or cfgName or "legit_default"
+            local target = selectedCfg or (cfgName ~= "" and cfgName) or "legit_default"
             autoloadCfg = target
             autoStatusLbl:SetText("Autoload Profile: " .. autoloadCfg)
             pcall(function()
@@ -6543,7 +6783,7 @@ function Library:BuildConfigTab(tab)
                     if not isfolder(self.Folder) then makefolder(self.Folder) end
                     writefile(self.Folder .. "/autoload.txt", target)
                     if not isfile or not isfile(self.Folder .. "/" .. target .. ".json") then
-                        writefile(self.Folder .. "/" .. target .. ".json", self:GetConfigJSON())
+                        writefile(self.Folder .. "/" .. target .. ".json", savedMemoryConfigs[target] or self:GetConfigJSON())
                     end
                 end
             end)
@@ -6586,7 +6826,12 @@ function Library:BuildConfigTab(tab)
             if idx and #cfgList.Values > 1 then
                 table.remove(cfgList.Values, idx)
                 selectedCfg = cfgList.Values[1]
+                cfgName = selectedCfg
                 cfgList:Refresh(cfgList.Values)
+                cfgList:Set(selectedCfg)
+                if cfgNameInput then
+                    cfgNameInput:Set(selectedCfg)
+                end
             end
             self:Notify({ Title = "Config Deleted", Description = "Removed profile '" .. tostring(target) .. "'.", Icon = "trash", Color = self.Theme.Risky })
         end
@@ -6622,9 +6867,13 @@ end
 
 function Library:Unload()
     self.Unloaded = true
+    if self.WorldController and self.WorldController.Cleanup then
+        pcall(self.WorldController.Cleanup)
+    end
     for _, conn in ipairs(self.Connections) do
         pcall(function() conn:Disconnect() end)
     end
+    table.clear(self.Connections)
     if ScreenGui and ScreenGui.Parent then
         ScreenGui:Destroy()
     end
