@@ -1398,12 +1398,13 @@ function Library:CreateKeybindList()
         local showAll = (Library.Flags["UI_KeybindListMode"] == "Show All Binds")
         for idx, flag in ipairs(Library.KeybindOrder) do
             local item = Library.ActiveKeybinds[flag]
-            if item and (item.Active or showAll) and item.Key and item.Key ~= Enum.KeyCode.Unknown then
+            local hasValidBind = item and ((item.Key and item.Key ~= Enum.KeyCode.Unknown) or item.Mode == "Always")
+            if item and (item.Active or showAll) and hasValidBind then
                 activeFlags[flag] = true
                 count += 1
                 local modeStr = "[" .. string.lower(item.Mode or "toggle") .. "]"
                 local keyStr = "[" .. Library:FormatKey(item.Key) .. "]"
-                local rightStr = keyStr .. " " .. modeStr
+                local rightStr = (not item.Key or item.Key == Enum.KeyCode.Unknown) and modeStr or (keyStr .. " " .. modeStr)
                 local nameW = Library:GetTextBounds(item.Name, 12, Vector2.new(300, 20)).X
                 local rightW = Library:GetTextBounds(rightStr, 11, Vector2.new(200, 20)).X
                 maxW = math.max(maxW, nameW + rightW + 34)
@@ -2874,50 +2875,93 @@ function Library:CreateWorldController()
     local lastLocalShotTarget = nil
     local lastTracerSpawnTime = 0
     local currentSilentPart = nil
+    local currentSilentPos = nil
     local currentSilentPlr = nil
+    local isInternalRaycast = false
     local hasSilentHook = false
+    local localMouse = LocalPlayer and LocalPlayer:GetMouse() or nil
     local vimService = nil
     pcall(function() vimService = game:GetService("VirtualInputManager") end)
 
-    -- Hook workspace raycast methods when hookmetamethod is available for true camera-free Silent Aim
+    -- Hook workspace raycasts, Camera rays & Mouse.Hit/Target for true camera-free Silent Aim in Counter Blox
     pcall(function()
         if hookmetamethod and getnamecallmethod then
+            local wrapClosure = newcclosure or function(fn) return fn end
             local oldNamecall
-            oldNamecall = hookmetamethod(game, "__namecall", function(selfObj, ...)
-                local method = getnamecallmethod()
-                if not Library.Unloaded
-                    and selfObj == workspace
-                    and (not checkcaller or not checkcaller())
-                    and Library.Flags["Rage_Enabled"] == true
-                    and Library.Flags["Rage_Silent"] == true
-                    and currentSilentPart
-                    and currentSilentPart.Parent
-                then
-                    local hc = tonumber(Library.Flags["Rage_Hitchance"]) or 100
-                    if math.random(1, 100) <= hc then
-                        local args = { ... }
-                        if (method == "FindPartOnRayWithIgnoreList" or method == "FindPartOnRayWithWhitelist" or method == "FindPartOnRay")
-                            and typeof(args[1]) == "Ray"
-                        then
-                            local origRay = args[1]
-                            local origin = origRay.Origin
-                            local dir = (currentSilentPart.Position - origin).Unit * math.max(origRay.Direction.Magnitude, 999)
-                            args[1] = Ray.new(origin, dir)
-                            lastLocalShotTime = os.clock()
-                            lastLocalShotTarget = currentSilentPlr
-                            return oldNamecall(selfObj, unpack(args))
-                        elseif method == "Raycast" and typeof(args[1]) == "Vector3" and typeof(args[2]) == "Vector3" then
-                            local origin = args[1]
-                            local dir = (currentSilentPart.Position - origin).Unit * math.max(args[2].Magnitude, 999)
-                            args[2] = dir
-                            lastLocalShotTime = os.clock()
-                            lastLocalShotTarget = currentSilentPlr
-                            return oldNamecall(selfObj, unpack(args))
+            oldNamecall = hookmetamethod(game, "__namecall", wrapClosure(function(selfObj, ...)
+                if not isInternalRaycast and not Library.Unloaded then
+                    local F = Library.Flags
+                    local targetPos = currentSilentPos or (currentSilentPart and currentSilentPart.Parent and currentSilentPart.Position)
+                    if F["Rage_Enabled"] == true and F["Rage_Silent"] == true and targetPos then
+                        local method = getnamecallmethod()
+                        local hc = tonumber(F["Rage_Hitchance"]) or 100
+                        if selfObj == workspace and math.random(1, 100) <= hc then
+                            if method == "FindPartOnRayWithIgnoreList"
+                                or method == "FindPartOnRayWithWhitelist"
+                                or method == "FindPartOnRay"
+                            then
+                                local args = { ... }
+                                if typeof(args[1]) == "Ray" then
+                                    local origRay = args[1]
+                                    local origin = origRay.Origin
+                                    local vec = targetPos - origin
+                                    if vec.Magnitude > 0.05 then
+                                        local len = math.max(origRay.Direction.Magnitude, vec.Magnitude + 50, 999)
+                                        args[1] = Ray.new(origin, vec.Unit * len)
+                                        lastLocalShotTime = os.clock()
+                                        lastLocalShotTarget = currentSilentPlr
+                                        return oldNamecall(selfObj, unpack(args))
+                                    end
+                                end
+                            elseif method == "Raycast" then
+                                local args = { ... }
+                                if typeof(args[1]) == "Vector3" and typeof(args[2]) == "Vector3" then
+                                    local origin = args[1]
+                                    local vec = targetPos - origin
+                                    if vec.Magnitude > 0.05 then
+                                        local len = math.max(args[2].Magnitude, vec.Magnitude + 50, 999)
+                                        args[2] = vec.Unit * len
+                                        lastLocalShotTime = os.clock()
+                                        lastLocalShotTarget = currentSilentPlr
+                                        return oldNamecall(selfObj, unpack(args))
+                                    end
+                                end
+                            end
+                        elseif selfObj == workspace.CurrentCamera and (method == "ViewportPointToRay" or method == "ScreenPointToRay") then
+                            local camPos = selfObj.CFrame.Position
+                            local vec = targetPos - camPos
+                            if vec.Magnitude > 0.05 then
+                                return Ray.new(camPos, vec.Unit)
+                            end
                         end
                     end
                 end
                 return oldNamecall(selfObj, ...)
-            end)
+            end))
+
+            local oldIndex
+            oldIndex = hookmetamethod(game, "__index", wrapClosure(function(selfObj, key)
+                if not isInternalRaycast and not Library.Unloaded and localMouse and selfObj == localMouse then
+                    local F = Library.Flags
+                    if F["Rage_Enabled"] == true and F["Rage_Silent"] == true and currentSilentPart and currentSilentPart.Parent then
+                        local targetPos = currentSilentPos or currentSilentPart.Position
+                        if key == "Hit" then
+                            return CFrame.new(targetPos)
+                        elseif key == "Target" then
+                            return currentSilentPart
+                        elseif key == "UnitRay" then
+                            local cam = workspace.CurrentCamera
+                            local orig = cam and cam.CFrame.Position or Vector3.zero
+                            local vec = targetPos - orig
+                            if vec.Magnitude > 0.05 then
+                                return Ray.new(orig, vec.Unit)
+                            end
+                        end
+                    end
+                end
+                return oldIndex(selfObj, key)
+            end))
+
             hasSilentHook = true
         end
     end)
@@ -3001,9 +3045,11 @@ function Library:CreateWorldController()
         params.IgnoreWater = true
         local ignore = table.clone(baseIgnore)
         params.FilterDescendantsInstances = ignore
+        isInternalRaycast = true
         for _ = 1, 5 do
             local hit = workspace:Raycast(origin, dir, params)
             if not hit or not hit.Instance then
+                isInternalRaycast = false
                 return nil
             end
             local inst = hit.Instance
@@ -3015,6 +3061,7 @@ function Library:CreateWorldController()
                 end
             end
             if isPlayerPart then
+                isInternalRaycast = false
                 return hit
             end
             -- Pierce through invisible Counter Blox clip/trigger parts or non-cancollide barriers
@@ -3022,9 +3069,11 @@ function Library:CreateWorldController()
                 table.insert(ignore, inst)
                 params.FilterDescendantsInstances = ignore
             else
+                isInternalRaycast = false
                 return hit
             end
         end
+        isInternalRaycast = false
         return nil
     end
     local noclipParts = {}
@@ -4319,11 +4368,14 @@ function Library:CreateWorldController()
                 or (kbBaim and kbBaim.Mode == "Hold" and kbBaim.Active)
 
             if rageActive or legitActive then
-                local fovLimitPx = legitActive and ((tonumber(F["Legit_FOV"]) or 4.5) * 12) or ((tonumber(F["Rage_FOV"]) or 180) * 1.6)
-                local dzPx = legitActive and ((tonumber(F["Legit_Deadzone"]) or 0) * 8) or 0
+                local rageFovDeg = math.clamp(tonumber(F["Rage_FOV"]) or 180, 1, 180)
+                local legitFovPx = (tonumber(F["Legit_FOV"]) or 4.5) * 14
+                local dzPx = (not rageActive) and ((tonumber(F["Legit_Deadzone"]) or 0) * 8) or 0
                 local priority = F["Rage_Priority"] or "FOV Closest"
                 local allowWall = rageActive and (F["Rage_Autowall"] == true)
                 local hbMap = type(F["Rage_Hitboxes"]) == "table" and F["Rage_Hitboxes"] or nil
+                local headScale = math.clamp((tonumber(F["Rage_HeadScale"]) or 65) / 100, 0.2, 1) * 0.45
+                local bodyScale = math.clamp((tonumber(F["Rage_BodyScale"]) or 80) / 100, 0.2, 1) * 0.45
 
                 local baseIgnore = { cam, beamFolder }
                 if myChar then table.insert(baseIgnore, myChar) end
@@ -4338,64 +4390,116 @@ function Library:CreateWorldController()
                     table.insert(baseIgnore, mapFolder.Clips)
                 end
 
-                local function ResolveTargetPart(char, tel)
-                    if forceBaim then
-                        return char:FindFirstChild("LowerTorso") or char:FindFirstChild("Torso") or tel.RootPart
+                local function GetCandidateParts(char, tel)
+                    local list = {}
+                    local headPart = char:FindFirstChild("HeadHB") or char:FindFirstChild("FakeHead") or char:FindFirstChild("Head")
+                    local chestPart = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso") or tel.RootPart
+                    local pelvisPart = char:FindFirstChild("LowerTorso") or char:FindFirstChild("Torso") or tel.RootPart
+                    if forceBaim or (tel.HP <= (tonumber(F["Rage_MinDmg"]) or 42) and type(F["Rage_SafePoint"]) == "table" and F["Rage_SafePoint"]["Lethal HP"]) then
+                        if pelvisPart then table.insert(list, { Part = pelvisPart, Scale = bodyScale }) end
+                        if chestPart then table.insert(list, { Part = chestPart, Scale = bodyScale }) end
+                        return list
                     end
                     if hbMap and next(hbMap) ~= nil then
-                        if hbMap["Head"] and char:FindFirstChild("Head") then return char.Head end
-                        if (hbMap["Upper Chest"] or hbMap["Neck"]) and (char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")) then
-                            return char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
+                        if hbMap["Head"] and headPart then table.insert(list, { Part = headPart, Scale = headScale }) end
+                        if (hbMap["Upper Chest"] or hbMap["Neck"]) and chestPart then table.insert(list, { Part = chestPart, Scale = bodyScale }) end
+                        if hbMap["Pelvis"] and pelvisPart then table.insert(list, { Part = pelvisPart, Scale = bodyScale }) end
+                        if hbMap["Arms"] then
+                            local rArm = char:FindFirstChild("RightUpperArm") or char:FindFirstChild("Right Arm")
+                            local lArm = char:FindFirstChild("LeftUpperArm") or char:FindFirstChild("Left Arm")
+                            if rArm then table.insert(list, { Part = rArm, Scale = bodyScale }) end
+                            if lArm then table.insert(list, { Part = lArm, Scale = bodyScale }) end
                         end
-                        if hbMap["Pelvis"] and (char:FindFirstChild("LowerTorso") or tel.RootPart) then
-                            return char:FindFirstChild("LowerTorso") or tel.RootPart
-                        end
-                        if hbMap["Arms"] and (char:FindFirstChild("RightUpperArm") or char:FindFirstChild("Right Arm")) then
-                            return char:FindFirstChild("RightUpperArm") or char:FindFirstChild("Right Arm")
-                        end
-                        if (hbMap["Legs"] or hbMap["Feet"]) and (char:FindFirstChild("RightUpperLeg") or char:FindFirstChild("Right Leg")) then
-                            return char:FindFirstChild("RightUpperLeg") or char:FindFirstChild("Right Leg")
+                        if hbMap["Legs"] or hbMap["Feet"] then
+                            local rLeg = char:FindFirstChild("RightUpperLeg") or char:FindFirstChild("Right Leg")
+                            local lLeg = char:FindFirstChild("LeftUpperLeg") or char:FindFirstChild("Left Leg")
+                            if rLeg then table.insert(list, { Part = rLeg, Scale = bodyScale }) end
+                            if lLeg then table.insert(list, { Part = lLeg, Scale = bodyScale }) end
                         end
                     end
-                    return tel.Head or tel.RootPart
+                    if #list == 0 then
+                        if headPart then table.insert(list, { Part = headPart, Scale = headScale }) end
+                        if chestPart then table.insert(list, { Part = chestPart, Scale = bodyScale }) end
+                        if pelvisPart then table.insert(list, { Part = pelvisPart, Scale = bodyScale }) end
+                    end
+                    return list
+                end
+
+                local function CheckPointVisible(pt, char)
+                    if allowWall then return true end
+                    local dir = pt - cam.CFrame.Position
+                    local hit = RaycastPierceClips(cam.CFrame.Position, dir, baseIgnore)
+                    return (not hit) or hit.Instance:IsDescendantOf(char)
                 end
 
                 local bestAimPart = nil
+                local bestAimPoint = nil
                 local bestPlr = nil
                 local bestScore = math.huge
+
                 for _, plr in ipairs(Players:GetPlayers()) do
                     if plr ~= LocalPlayer then
                         local isWhitelisted = (F["Misc_Whitelist"] == true) and (F["Misc_PlayerTarget"] == plr.Name)
                         local tel = self:GetPlayerTelemetry(plr)
                         if not isWhitelisted and tel and tel.Alive and (not F["ESP_TeamCheck"] or not tel.IsTeammate) then
-                            local part = ResolveTargetPart(tel.Character, tel)
-                            if part then
-                                local sp, onScr = cam:WorldToViewportPoint(part.Position)
-                                if (onScr or (rageActive and (tonumber(F["Rage_FOV"]) or 180) >= 150)) and sp.Z > 0 then
-                                    local fovDist = (Vector2.new(sp.X, sp.Y) - mPos).Magnitude
-                                    if fovDist <= fovLimitPx and fovDist >= dzPx then
-                                        local visible = allowWall
-                                        if not visible then
-                                            local dir = part.Position - cam.CFrame.Position
-                                            local hit = RaycastPierceClips(cam.CFrame.Position, dir, baseIgnore)
-                                            visible = (not hit) or hit.Instance:IsDescendantOf(tel.Character)
+                            local candidates = GetCandidateParts(tel.Character, tel)
+                            for _, cand in ipairs(candidates) do
+                                local part = cand.Part
+                                local pScale = cand.Scale
+                                local toPart = part.Position - cam.CFrame.Position
+                                local dist3d = toPart.Magnitude
+                                if dist3d > 0.5 then
+                                    local angDeg = math.deg(math.acos(math.clamp(cam.CFrame.LookVector:Dot(toPart.Unit), -1, 1)))
+                                    local sp, onScr = cam:WorldToViewportPoint(part.Position)
+                                    local fovDistPx = onScr and (Vector2.new(sp.X, sp.Y) - mPos).Magnitude or (angDeg * 14)
+
+                                    local inFov = false
+                                    if rageActive then
+                                        inFov = (angDeg <= rageFovDeg)
+                                    else
+                                        inFov = onScr and (sp.Z > 0) and (fovDistPx <= legitFovPx) and (fovDistPx >= dzPx)
+                                    end
+
+                                    if inFov then
+                                        local chosenPt = nil
+                                        if CheckPointVisible(part.Position, tel.Character) then
+                                            chosenPt = part.Position
+                                        elseif rageActive and pScale > 0 then
+                                            -- Multipoint edge scan (left / right / top of hitbox)
+                                            local sz = part.Size
+                                            local offsets = {
+                                                part.CFrame.RightVector * (sz.X * pScale),
+                                                -part.CFrame.RightVector * (sz.X * pScale),
+                                                part.CFrame.UpVector * (sz.Y * pScale),
+                                            }
+                                            for _, off in ipairs(offsets) do
+                                                if CheckPointVisible(part.Position + off, tel.Character) then
+                                                    chosenPt = part.Position + off
+                                                    break
+                                                end
+                                            end
                                         end
-                                        if visible then
-                                            local score = fovDist
+
+                                        if chosenPt then
+                                            local score = fovDistPx
                                             if rageActive then
                                                 if priority == "Lowest HP" then
                                                     score = tel.HP
                                                 elseif priority == "Shortest Distance" then
-                                                    score = (part.Position - cam.CFrame.Position).Magnitude
+                                                    score = dist3d
                                                 elseif priority == "Highest Threat" then
-                                                    score = (part.Position - cam.CFrame.Position).Magnitude * 0.5 + tel.HP
+                                                    score = dist3d * 0.5 + tel.HP
+                                                else
+                                                    score = angDeg
                                                 end
                                             end
                                             if score < bestScore then
                                                 bestScore = score
                                                 bestAimPart = part
+                                                bestAimPoint = chosenPt
                                                 bestPlr = plr
                                             end
+                                            break -- found visible hitbox on this player in priority order
                                         end
                                     end
                                 end
@@ -4405,11 +4509,12 @@ function Library:CreateWorldController()
                 end
 
                 currentSilentPart = (rageActive and F["Rage_Silent"] == true) and bestAimPart or nil
+                currentSilentPos = (rageActive and F["Rage_Silent"] == true) and bestAimPoint or nil
                 currentSilentPlr = (rageActive and F["Rage_Silent"] == true) and bestPlr or nil
 
-                if bestAimPart then
-                    local aimPos = bestAimPart.Position
-                    if legitActive and F["Legit_RCS"] then
+                if bestAimPart and bestAimPoint then
+                    local aimPos = bestAimPoint
+                    if not rageActive and F["Legit_RCS"] then
                         aimPos = aimPos - Vector3.new(0, 0.18, 0)
                     end
                     local targetCF = CFrame.lookAt(cam.CFrame.Position, aimPos)
@@ -4422,11 +4527,11 @@ function Library:CreateWorldController()
                         if F["Rage_Silent"] ~= true or not hasSilentHook then
                             cam.CFrame = (F["Rage_Silent"] == true) and targetCF or cam.CFrame:Lerp(targetCF, 0.92)
                         end
-                        local fireCooldown = (F["Rage_DT"] == true) and 0.06 or 0.14
+                        local fireCooldown = (F["Rage_DT"] == true) and 0.05 or 0.12
                         if F["Rage_AutoFire"] and (os.clock() - lastRageFire) >= fireCooldown then
                             lastRageFire = os.clock()
                             FireWeapon(myChar, mPos, bestPlr)
-                            SpawnTracer(bestAimPart.Position)
+                            SpawnTracer(aimPos)
                         end
                     else
                         local smooth = math.max(1, tonumber(F["Legit_Smooth"]) or 6.5)
@@ -4436,6 +4541,7 @@ function Library:CreateWorldController()
                 end
             else
                 currentSilentPart = nil
+                currentSilentPos = nil
                 currentSilentPlr = nil
             end
 
@@ -4834,10 +4940,10 @@ function Library:CreateKeybindAttachment(parentRow, cfg, toggleLink)
 
     local function SyncKeybindList()
         local isShown = false
-        if currentKey and currentKey ~= Enum.KeyCode.Unknown then
-            if mode == "Always" then
-                isShown = (toggleLink == nil) or (toggleLink.Value == true)
-            elseif mode == "Hold" then
+        if mode == "Always" then
+            isShown = (toggleLink == nil) or (toggleLink.Value == true)
+        elseif currentKey and currentKey ~= Enum.KeyCode.Unknown then
+            if mode == "Hold" then
                 isShown = (toggleLink == nil or toggleLink.Value == true) and (Keybind.Active == true)
             elseif toggleLink then
                 isShown = (toggleLink.Value == true)
