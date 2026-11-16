@@ -17,6 +17,7 @@ local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 local CoreGui = game:GetService("CoreGui")
 local TextService = game:GetService("TextService")
+local GuiService = game:GetService("GuiService")
 
 local LocalPlayer = Players.LocalPlayer
 
@@ -280,6 +281,17 @@ function Library:SetAccent(accent, accentDark)
     self:UpdateTheme()
 end
 
+function Library:GetGuiInsetY()
+    if self.ScreenGui and self.ScreenGui.IgnoreGuiInset then
+        local ok, inset = pcall(function()
+            local tl = GuiService:GetGuiInset()
+            return tl.Y
+        end)
+        return (ok and type(inset) == "number") and inset or 0
+    end
+    return 0
+end
+
 function Library:ClosePopups(except)
     for _, popup in ipairs(self.OpenPopups) do
         if popup ~= except and popup.Close then
@@ -440,6 +452,33 @@ local ScreenGui = Library:Create("ScreenGui", {
 })
 Library.ScreenGui = ScreenGui
 
+Library:Connect(UserInputService.InputBegan, function(input)
+    if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.MouseButton2 then
+        return
+    end
+    local mPos = UserInputService:GetMouseLocation()
+    local insetY = Library:GetGuiInsetY()
+    local pt = Vector2.new(mPos.X, mPos.Y - insetY)
+    for _, p in ipairs(Library.OpenPopups) do
+        if p.IsOpen and p.IsOpen() then
+            local inside = false
+            if p.Frames then
+                for _, f in ipairs(p.Frames) do
+                    if f and f.Visible then
+                        local ap, as = f.AbsolutePosition, f.AbsoluteSize
+                        if pt.X >= ap.X and pt.X <= (ap.X + as.X) and pt.Y >= ap.Y and pt.Y <= (ap.Y + as.Y) then
+                            inside = true
+                            break
+                        end
+                    end
+                end
+            end
+            if not inside and p.Close then
+                p.Close()
+            end
+        end
+    end
+end)
 -- Tooltip Frame
 local TooltipFrame = Library:Create("Frame", {
     Name = "Tooltip",
@@ -876,6 +915,10 @@ function Library:CreateKeybindAttachment(parentRow, cfg, toggleLink)
     })
 
     local popupCtrl = {
+        Frames = { modePopup, btn },
+        IsOpen = function()
+            return modePopup.Visible
+        end,
         Close = function()
             modePopup.Visible = false
         end
@@ -948,7 +991,8 @@ function Library:CreateKeybindAttachment(parentRow, cfg, toggleLink)
     self:Connect(btn.MouseButton2Click, function()
         Library:ClosePopups(popupCtrl)
         local abs = btn.AbsolutePosition
-        modePopup.Position = UDim2.fromOffset(abs.X, abs.Y + 20)
+        local insetY = self:GetGuiInsetY()
+        modePopup.Position = UDim2.fromOffset(abs.X, abs.Y + insetY + 20)
         modePopup.Visible = not modePopup.Visible
     end)
 
@@ -1071,6 +1115,10 @@ function Library:CreateColorPickerAttachment(parentRow, cfg)
     self:CreateAccentBar(popup, 362)
 
     local popupCtrl = {
+        Frames = { popup, swatch },
+        IsOpen = function()
+            return popup.Visible
+        end,
         Close = function()
             popup.Visible = false
         end
@@ -1319,9 +1367,10 @@ function Library:CreateColorPickerAttachment(parentRow, cfg)
         Library:ClosePopups(popupCtrl)
         if willShow then
             local abs = swatch.AbsolutePosition
+            local insetY = self:GetGuiInsetY()
             local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1920, 1080)
             local px = math.clamp(abs.X - 185, 6, math.max(6, vp.X - 225))
-            local py = math.clamp(abs.Y + 18, 6, math.max(6, vp.Y - 225))
+            local py = math.clamp(abs.Y + insetY + 18, 6, math.max(6, vp.Y - 225))
             popup.Position = UDim2.fromOffset(px, py)
             popup.Visible = true
         end
@@ -1833,7 +1882,7 @@ function GroupboxMethods:AddDropdown(cfg)
         Name = "DropMenu_" .. name,
         BackgroundColor3 = Library.Theme.Background,
         Size = UDim2.fromOffset(180, 0),
-        ClipsDescendants = true,
+        ClipsDescendants = false,
         Visible = false,
         ZIndex = 340,
         Parent = ScreenGui,
@@ -1842,6 +1891,10 @@ function GroupboxMethods:AddDropdown(cfg)
     Library:ApplyCSBorder(dropMenu, "HighlightBorder")
 
     local popupCtrl = {
+        Frames = { dropMenu, boxBtn },
+        IsOpen = function()
+            return opened and dropMenu.Visible
+        end,
         Close = function()
             opened = false
             Library:Tween(chevron, TweenFast, { Rotation = 0 })
@@ -2020,14 +2073,32 @@ function GroupboxMethods:AddDropdown(cfg)
             end
         end
 
+        if shown == 0 then
+            local emptyLbl = Library:Create("TextButton", {
+                BackgroundTransparency = 1,
+                AutoButtonColor = false,
+                Size = UDim2.new(1, 0, 0, 20),
+                Font = Enum.Font.Code,
+                Text = "  No options found",
+                TextColor3 = Library.Theme.TextMuted,
+                TextSize = 11,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                ZIndex = 343,
+                Parent = scroll,
+            })
+            shown = 1
+        end
+
         local contentH = shown * 21
         scroll.CanvasSize = UDim2.fromOffset(0, contentH)
-        local menuH = math.clamp(contentH + listTopOffset + 4, listTopOffset + 22, 165)
+        local menuH = math.clamp(math.max(20, contentH) + listTopOffset + 4, listTopOffset + 22, 165)
+        local menuW = math.max(140, boxBtn.AbsoluteSize.X)
         if opened then
             Library:Tween(dropMenu, TweenFast, {
-                Size = UDim2.fromOffset(boxBtn.AbsoluteSize.X, menuH)
+                Size = UDim2.fromOffset(menuW, menuH)
             })
         end
+        return menuH, menuW
     end
 
     if searchBox then
@@ -2095,15 +2166,29 @@ function GroupboxMethods:AddDropdown(cfg)
         Library:Connect(Players.PlayerRemoving, SyncPlayers)
     end
 
-    Library:Connect(boxBtn.MouseButton1Click, function()
+    local function PositionDropMenu()
+        local absPos = boxBtn.AbsolutePosition
+        local absSize = boxBtn.AbsoluteSize
+        local insetY = Library:GetGuiInsetY()
+        local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1920, 1080)
+        local shownCount = math.max(1, #values)
+        local estH = math.clamp(shownCount * 21 + listTopOffset + 4, listTopOffset + 22, 165)
+        local posY = absPos.Y + insetY + absSize.Y + 2
+        if posY + estH > vp.Y - 8 and (absPos.Y + insetY - estH - 2) > 8 then
+            posY = absPos.Y + insetY - estH - 2
+        end
+        dropMenu.Position = UDim2.fromOffset(absPos.X, posY)
+    end
+
+    local function ToggleDropdown()
         local nextState = not opened
         Library:ClosePopups(popupCtrl)
         opened = nextState
         if opened then
-            local absPos = boxBtn.AbsolutePosition
             local absSize = boxBtn.AbsoluteSize
-            dropMenu.Position = UDim2.fromOffset(absPos.X, absPos.Y + absSize.Y + 2)
-            dropMenu.Size = UDim2.fromOffset(absSize.X, 0)
+            local initW = math.max(140, absSize.X)
+            PositionDropMenu()
+            dropMenu.Size = UDim2.fromOffset(initW, 2)
             dropMenu.Visible = true
             Library:Tween(chevron, TweenFast, { Rotation = 180 })
             Library:Tween(boxStroke, TweenFast, { Color = Library.Theme.Accent })
@@ -2111,13 +2196,17 @@ function GroupboxMethods:AddDropdown(cfg)
         else
             popupCtrl.Close()
         end
+    end
+
+    Library:Connect(boxBtn.InputBegan, function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            ToggleDropdown()
+        end
     end)
 
     Library:Connect(boxBtn:GetPropertyChangedSignal("AbsolutePosition"), function()
         if opened and dropMenu.Visible then
-            local absPos = boxBtn.AbsolutePosition
-            local absSize = boxBtn.AbsoluteSize
-            dropMenu.Position = UDim2.fromOffset(absPos.X, absPos.Y + absSize.Y + 2)
+            PositionDropMenu()
         end
     end)
 
