@@ -40,6 +40,7 @@ local Library = {
     ActiveKeybinds = {},
     KeybindOrder = {},
     KeybindCounter = 0,
+    HUDFrames = {},
     Notifications = {},
     OpenPopups = {},
     Folder = "ShardsUI",
@@ -485,7 +486,10 @@ function Library:CreateAccentBar(parent, zIndex)
     return bar, grad
 end
 
-function Library:MakeDraggable(dragHandle, targetFrame)
+function Library:MakeDraggable(dragHandle, targetFrame, hudId)
+    if hudId or (targetFrame and targetFrame.Name and targetFrame.Name ~= "") then
+        self.HUDFrames[hudId or targetFrame.Name] = targetFrame
+    end
     local dragging = false
     local dragStart, startPos
 
@@ -517,6 +521,34 @@ function Library:MakeDraggable(dragHandle, targetFrame)
             dragging = false
         end
     end)
+end
+
+function Library:RefreshAttachmentTray(tray)
+    if not tray or tray.Name ~= "AttachTray" then return end
+    local totalW = 0
+    local visibleCount = 0
+    for _, ch in ipairs(tray:GetChildren()) do
+        if ch:IsA("GuiObject") and ch.Visible then
+            visibleCount += 1
+            totalW += ch.Size.X.Offset
+        end
+    end
+    totalW += math.max(0, visibleCount - 1) * 5
+    local trayW = math.max(40, totalW + 4)
+    tray.Size = UDim2.fromOffset(trayW, 16)
+    local row = tray.Parent
+    if row then
+        local lbl = row:FindFirstChildOfClass("TextLabel")
+        local clickBtn = row:FindFirstChildOfClass("TextButton")
+        local rightPad = trayW + 8
+        if lbl then
+            local leftX = lbl.Position.X.Offset
+            lbl.Size = UDim2.new(1, -(leftX + rightPad), 1, 0)
+        end
+        if clickBtn and clickBtn.Name ~= "ColorSwatch" and clickBtn.Name ~= "KeybindBtn" then
+            clickBtn.Size = UDim2.new(1, -rightPad, 1, 0)
+        end
+    end
 end
 
 function Library:FormatKey(key)
@@ -1643,6 +1675,784 @@ function Library:CreateTargetHUD()
 end
 
 -- ============================================================================
+-- 1. SKEET / GAMESENSE CROSSHAIR & BOTTOM-LEFT INDICATORS
+-- ============================================================================
+function Library:CreateIndicators()
+    local indFrame = self:Create("Frame", {
+        Name = "Indicators",
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, 18, 0.56, 0),
+        Size = UDim2.fromOffset(180, 130),
+        Visible = false,
+        ZIndex = 265,
+        Parent = ScreenGui,
+    })
+    self:MakeDraggable(indFrame, indFrame, "Indicators")
+
+    self:Create("UIListLayout", {
+        Padding = UDim.new(0, 3),
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        VerticalAlignment = Enum.VerticalAlignment.Bottom,
+        Parent = indFrame,
+    })
+
+    local rows = {}
+    local customItems = {}
+    local indObj = {
+        Frame = indFrame,
+        Rows = rows,
+        Custom = customItems,
+    }
+
+    local function GetOrMakeRow(id, order)
+        local entry = rows[id]
+        if entry and entry.Row and entry.Row.Parent then
+            entry.Row.LayoutOrder = order
+            return entry
+        end
+
+        local row = self:Create("Frame", {
+            Name = "Ind_" .. tostring(id),
+            BackgroundTransparency = 1,
+            LayoutOrder = order,
+            Size = UDim2.fromOffset(120, 22),
+            ZIndex = 266,
+            Parent = indFrame,
+        })
+
+        local bg = self:Create("Frame", {
+            BackgroundColor3 = self.Theme.Background,
+            BackgroundTransparency = 0.22,
+            Size = UDim2.fromScale(1, 1),
+            ZIndex = 266,
+            Parent = row,
+        })
+        self:BindTheme(bg, "BackgroundColor3", "Background")
+        self:ApplyCSBorder(bg, "InnerBorder")
+
+        local leftBar = self:Create("Frame", {
+            BackgroundColor3 = self.Theme.Accent,
+            BorderSizePixel = 0,
+            Size = UDim2.new(0, 2, 1, 0),
+            ZIndex = 268,
+            Parent = bg,
+        })
+
+        local grad = self:Create("UIGradient", {
+            Transparency = NumberSequence.new({
+                NumberSequenceKeypoint.new(0, 0.05),
+                NumberSequenceKeypoint.new(1, 0.45),
+            }),
+            Parent = bg,
+        })
+
+        local lbl = self:Create("TextLabel", {
+            BackgroundTransparency = 1,
+            Position = UDim2.fromOffset(8, 0),
+            Size = UDim2.new(1, -12, 1, 0),
+            Font = Enum.Font.GothamBold,
+            Text = tostring(id),
+            TextColor3 = self.Theme.Accent,
+            TextSize = 13,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            ZIndex = 268,
+            Parent = bg,
+        })
+
+        local barBg = self:Create("Frame", {
+            BackgroundColor3 = self.Theme.Element,
+            BorderSizePixel = 0,
+            Position = UDim2.new(0, 8, 1, -4),
+            Size = UDim2.new(1, -14, 0, 2),
+            Visible = false,
+            ZIndex = 268,
+            Parent = bg,
+        })
+
+        local barFill = self:Create("Frame", {
+            BackgroundColor3 = self.Theme.Accent,
+            BorderSizePixel = 0,
+            Size = UDim2.fromScale(1, 1),
+            ZIndex = 269,
+            Parent = barBg,
+        })
+
+        entry = {
+            Row = row,
+            Bg = bg,
+            LeftBar = leftBar,
+            Grad = grad,
+            Label = lbl,
+            BarBg = barBg,
+            BarFill = barFill,
+        }
+        rows[id] = entry
+        return entry
+    end
+
+    function indObj:SetIndicator(id, cfg)
+        if not cfg or cfg.Active == false then
+            customItems[id] = nil
+        else
+            customItems[id] = cfg
+        end
+        indObj:Refresh()
+    end
+
+    function indObj:Refresh()
+        local activeList = {}
+
+        if self.Flags or Library.Flags then
+            local F = Library.Flags
+            if F["Rage_DT"] then
+                local shift = tonumber(F["Rage_ShiftTicks"]) or 14
+                table.insert(activeList, {
+                    Id = "DT",
+                    Text = string.format("DT [%dt]", shift),
+                    Color = Library.Theme.Accent,
+                    Progress = math.clamp(shift / 18, 0, 1),
+                })
+            end
+            if F["Rage_HideShots"] then
+                table.insert(activeList, {
+                    Id = "HS",
+                    Text = "ONSHOT // HS",
+                    Color = Library.Theme.Success,
+                })
+            end
+            if F["Rage_ForceBaim"] then
+                table.insert(activeList, {
+                    Id = "BAIM",
+                    Text = "FORCE BAIM",
+                    Color = Library.Theme.Risky,
+                })
+            end
+            if F["Rage_Autowall"] then
+                local awDmg = tonumber(F["Rage_AutowallDmg"]) or tonumber(F["Rage_MinDmg"]) or 24
+                table.insert(activeList, {
+                    Id = "DMG",
+                    Text = string.format("MIN DMG: %d", awDmg),
+                    Color = Library.Theme.Text,
+                })
+            end
+            if F["FL_Enable"] then
+                local choke = tonumber(F["FL_Limit"]) or 14
+                table.insert(activeList, {
+                    Id = "FL",
+                    Text = string.format("CHOKE: %dt", choke),
+                    Color = Library.Theme.Warning,
+                    Progress = math.clamp(choke / 16, 0, 1),
+                })
+            end
+            if F["AA_Enabled"] then
+                table.insert(activeList, {
+                    Id = "FREESTAND",
+                    Text = "AA // ACTIVE",
+                    Color = Library.Theme.Accent,
+                })
+            end
+        end
+
+        for id, c in pairs(customItems) do
+            table.insert(activeList, {
+                Id = id,
+                Text = c.Text or id,
+                Color = c.Color or Library.Theme.Accent,
+                Progress = c.Progress,
+            })
+        end
+
+        if #activeList == 0 then
+            table.insert(activeList, {
+                Id = "SHARDS",
+                Text = string.upper(Library.Title or "SHARDS.CC"),
+                Color = Library.Theme.Accent,
+            })
+        end
+
+        local seen = {}
+        for idx, item in ipairs(activeList) do
+            seen[item.Id] = true
+            local entry = GetOrMakeRow(item.Id, idx)
+            local col = item.Color or Library.Theme.Accent
+            entry.Label.Text = item.Text
+            entry.Label.TextColor3 = col
+            entry.LeftBar.BackgroundColor3 = col
+            local bounds = Library:GetTextBounds(item.Text, 13, Vector2.new(300, 24), true)
+            local w = math.max(76, bounds.X + 20)
+            local h = item.Progress ~= nil and 24 or 20
+            entry.Row.Size = UDim2.fromOffset(w, h)
+            if item.Progress ~= nil then
+                entry.Label.Position = UDim2.fromOffset(8, -2)
+                entry.BarBg.Visible = true
+                entry.BarFill.BackgroundColor3 = col
+                entry.BarFill.Size = UDim2.fromScale(math.clamp(item.Progress, 0, 1), 1)
+            else
+                entry.Label.Position = UDim2.fromOffset(8, 0)
+                entry.BarBg.Visible = false
+            end
+        end
+
+        for id, entry in pairs(rows) do
+            if not seen[id] then
+                if entry.Row and entry.Row.Parent then
+                    entry.Row:Destroy()
+                end
+                rows[id] = nil
+            end
+        end
+    end
+
+    function indObj:SetVisible(v)
+        indFrame.Visible = (v == true)
+        if indFrame.Visible then
+            indObj:Refresh()
+        end
+    end
+
+    indObj:Refresh()
+    self.Indicators = indObj
+    return indObj
+end
+
+-- ============================================================================
+-- 2. DRAGGABLE 2D RADAR WINDOW (Camera-Relative Blips, FOV Cone, Cardinal Ticks)
+-- ============================================================================
+function Library:CreateRadar(cfg)
+    cfg = cfg or {}
+    local radarSize = cfg.Size or 170
+    local radarRange = cfg.Range or 180 -- studs from center to edge
+
+    local radarFrame = self:Create("Frame", {
+        Name = "RadarWindow",
+        BackgroundColor3 = self.Theme.Background,
+        Position = UDim2.new(0, 16, 0.14, 0),
+        Size = UDim2.fromOffset(radarSize, radarSize + 24),
+        Visible = false,
+        ZIndex = 260,
+        Parent = ScreenGui,
+    })
+    self:BindTheme(radarFrame, "BackgroundColor3", "Background")
+    self:ApplyCSBorder(radarFrame, "InnerBorder")
+    self:CreateAccentBar(radarFrame, 263)
+    self:MakeDraggable(radarFrame, radarFrame, "RadarWindow")
+
+    local hdrIcon = self:Create("ImageLabel", {
+        BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(8, 6),
+        Size = UDim2.fromOffset(12, 12),
+        Image = self:GetIcon("radar"),
+        ImageColor3 = self.Theme.Accent,
+        ZIndex = 262,
+        Parent = radarFrame,
+    })
+    self:BindTheme(hdrIcon, "ImageColor3", "Accent")
+
+    local hdrTitle = self:Create("TextLabel", {
+        BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(25, 2),
+        Size = UDim2.new(1, -30, 0, 20),
+        Font = Enum.Font.GothamBold,
+        Text = "2D RADAR",
+        TextColor3 = self.Theme.Text,
+        TextSize = 11,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 262,
+        Parent = radarFrame,
+    })
+    self:BindTheme(hdrTitle, "TextColor3", "Text")
+
+    local canvas = self:Create("Frame", {
+        BackgroundColor3 = Color3.fromRGB(13, 13, 17),
+        ClipsDescendants = true,
+        Position = UDim2.fromOffset(6, 24),
+        Size = UDim2.new(1, -12, 1, -30),
+        ZIndex = 261,
+        Parent = radarFrame,
+    })
+    self:ApplyCSBorder(canvas, "InnerBorder")
+
+    -- Subtle Tactical Crosslines + Range Rings
+    self:Create("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0),
+        BackgroundColor3 = Color3.fromRGB(28, 28, 36),
+        BorderSizePixel = 0,
+        Position = UDim2.fromScale(0.5, 0),
+        Size = UDim2.new(0, 1, 1, 0),
+        ZIndex = 261,
+        Parent = canvas,
+    })
+    self:Create("Frame", {
+        AnchorPoint = Vector2.new(0, 0.5),
+        BackgroundColor3 = Color3.fromRGB(28, 28, 36),
+        BorderSizePixel = 0,
+        Position = UDim2.fromScale(0, 0.5),
+        Size = UDim2.new(1, 0, 0, 1),
+        ZIndex = 261,
+        Parent = canvas,
+    })
+
+    for _, rScale in ipairs({ 0.45, 0.82 }) do
+        local ring = self:Create("Frame", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            BackgroundTransparency = 1,
+            Position = UDim2.fromScale(0.5, 0.5),
+            Size = UDim2.fromScale(rScale, rScale),
+            ZIndex = 261,
+            Parent = canvas,
+        })
+        self:Create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = ring })
+        self:Create("UIStroke", { Color = Color3.fromRGB(26, 26, 34), Thickness = 1, Parent = ring })
+    end
+
+    -- Cardinal N Label
+    local northLbl = self:Create("TextLabel", {
+        AnchorPoint = Vector2.new(0.5, 0),
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0.5, 0, 0, 2),
+        Size = UDim2.fromOffset(16, 12),
+        Font = Enum.Font.GothamBold,
+        Text = "N",
+        TextColor3 = self.Theme.Accent,
+        TextSize = 9,
+        ZIndex = 263,
+        Parent = canvas,
+    })
+    self:BindTheme(northLbl, "TextColor3", "Accent")
+
+    -- Center LocalPlayer Arrow / Dot
+    local selfDot = self:Create("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundColor3 = Color3.fromRGB(240, 240, 245),
+        BorderSizePixel = 0,
+        Position = UDim2.fromScale(0.5, 0.5),
+        Size = UDim2.fromOffset(5, 5),
+        ZIndex = 264,
+        Parent = canvas,
+    })
+    self:Create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = selfDot })
+    self:Create("UIStroke", { Color = Color3.new(0, 0, 0), Thickness = 1, Parent = selfDot })
+
+    local blips = {}
+    local demoBlips = {
+        { Name = "s1mple",  Offset = Vector2.new(-38, -52), Enemy = true },
+        { Name = "donk666", Offset = Vector2.new(46, -28),  Enemy = true },
+        { Name = "m0NESY",  Offset = Vector2.new(-22, 44),  Enemy = false },
+    }
+
+    local function GetOrMakeBlip(key)
+        local b = blips[key]
+        if b and b.Dot and b.Dot.Parent then return b end
+
+        local dot = self:Create("Frame", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            BackgroundColor3 = self.Theme.Risky,
+            BorderSizePixel = 0,
+            Position = UDim2.fromScale(0.5, 0.5),
+            Size = UDim2.fromOffset(5, 5),
+            ZIndex = 263,
+            Parent = canvas,
+        })
+        self:Create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = dot })
+        self:Create("UIStroke", { Color = Color3.new(0, 0, 0), Thickness = 1, Parent = dot })
+
+        local tag = self:Create("TextLabel", {
+            AnchorPoint = Vector2.new(0.5, 1),
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0.5, 0, 0, -1),
+            Size = UDim2.fromOffset(70, 10),
+            Font = Enum.Font.Code,
+            Text = tostring(key),
+            TextColor3 = self.Theme.Text,
+            TextSize = 9,
+            ZIndex = 263,
+            Parent = dot,
+        })
+
+        b = { Dot = dot, Tag = tag }
+        blips[key] = b
+        return b
+    end
+
+    self:Connect(RunService.RenderStepped, function()
+        if not radarFrame.Visible or self.Unloaded then return end
+        local cam = workspace.CurrentCamera
+        local cSize = canvas.AbsoluteSize
+        local halfW = math.max(20, cSize.X * 0.5 - 6)
+        local halfH = math.max(20, cSize.Y * 0.5 - 6)
+
+        local myPos = Vector3.zero
+        local camLook = Vector3.new(0, 0, -1)
+        local camRight = Vector3.new(1, 0, 0)
+        if cam then
+            camLook = Vector3.new(cam.CFrame.LookVector.X, 0, cam.CFrame.LookVector.Z)
+            if camLook.Magnitude > 0.001 then camLook = camLook.Unit else camLook = Vector3.new(0, 0, -1) end
+            camRight = Vector3.new(cam.CFrame.RightVector.X, 0, cam.CFrame.RightVector.Z)
+            if camRight.Magnitude > 0.001 then camRight = camRight.Unit else camRight = Vector3.new(1, 0, 0) end
+            myPos = cam.CFrame.Position
+        end
+        if LocalPlayer and LocalPlayer.Character then
+            local ok, piv = pcall(function() return LocalPlayer.Character:GetPivot().Position end)
+            if ok and piv then myPos = piv end
+        end
+
+        local activeKeys = {}
+        local otherCount = 0
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr ~= LocalPlayer and plr.Character then
+                local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+                if not hum or hum.Health > 0 then
+                    local ok, tPos = pcall(function() return plr.Character:GetPivot().Position end)
+                    if ok and tPos then
+                        otherCount += 1
+                        activeKeys[plr.Name] = true
+                        local delta = tPos - myPos
+                        local rx = delta:Dot(camRight) / radarRange
+                        local ry = -delta:Dot(camLook) / radarRange
+                        local mag = math.sqrt(rx * rx + ry * ry)
+                        if mag > 1 then
+                            rx = rx / mag
+                            ry = ry / mag
+                        end
+                        local b = GetOrMakeBlip(plr.Name)
+                        local isSelected = (Library.Flags["Misc_PlayerTarget"] == plr.Name)
+                        b.Dot.Position = UDim2.new(0.5, math.floor(rx * halfW + 0.5), 0.5, math.floor(ry * halfH + 0.5))
+                        b.Dot.BackgroundColor3 = isSelected and self.Theme.Accent or self.Theme.Risky
+                        b.Tag.Text = plr.Name
+                    end
+                end
+            end
+        end
+
+        -- Show demo blips if solo or Demo Specs is enabled so the radar is never empty while testing
+        if otherCount == 0 or Library.Flags["Misc_DemoSpecs"] then
+            local t = os.clock() * 0.45
+            for idx, d in ipairs(demoBlips) do
+                local key = "Demo_" .. d.Name
+                activeKeys[key] = true
+                local ang = t + idx * 1.7
+                local ox = d.Offset.X + math.cos(ang) * 10
+                local oy = d.Offset.Y + math.sin(ang) * 10
+                local rx = math.clamp(ox / (radarRange * 0.5), -0.92, 0.92)
+                local ry = math.clamp(oy / (radarRange * 0.5), -0.92, 0.92)
+                local b = GetOrMakeBlip(key)
+                b.Dot.Position = UDim2.new(0.5, math.floor(rx * halfW + 0.5), 0.5, math.floor(ry * halfH + 0.5))
+                b.Dot.BackgroundColor3 = d.Enemy and self.Theme.Risky or self.Theme.Accent
+                b.Tag.Text = d.Name
+            end
+        end
+
+        for k, b in pairs(blips) do
+            if not activeKeys[k] then
+                if b.Dot and b.Dot.Parent then b.Dot:Destroy() end
+                blips[k] = nil
+            end
+        end
+    end)
+
+    local radarObj = { Frame = radarFrame }
+    function radarObj:SetVisible(v)
+        radarFrame.Visible = (v == true)
+    end
+    function radarObj:SetRange(studs)
+        radarRange = math.max(25, tonumber(studs) or 180)
+    end
+    self.Radar = radarObj
+    return radarObj
+end
+
+-- ============================================================================
+-- 4. LIVE VIEWPORT TELEMETRY & OVERLAY CONTROLLER (FOV Circle, 2D Box/Name/HP/Tracer, World FX, Health Log)
+-- ============================================================================
+function Library:CreateWorldController()
+    if self.WorldController then return self.WorldController end
+
+    local overlayFolder = self:Create("Folder", {
+        Name = "WorldViewportOverlay",
+        Parent = ScreenGui,
+    })
+
+    -- Center FOV Circle
+    local fovCircle = self:Create("Frame", {
+        Name = "FOVCircle",
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundTransparency = 1,
+        Position = UDim2.fromScale(0.5, 0.5),
+        Size = UDim2.fromOffset(180, 180),
+        Visible = false,
+        ZIndex = 50,
+        Parent = overlayFolder,
+    })
+    self:Create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = fovCircle })
+    local fovOuter = self:Create("UIStroke", {
+        Color = Color3.new(0, 0, 0),
+        Thickness = 2,
+        Transparency = 0.35,
+        Parent = fovCircle,
+    })
+    local fovStroke = self:Create("UIStroke", {
+        Color = self.Theme.Accent,
+        Thickness = 1,
+        Parent = fovCircle,
+    })
+    self:BindTheme(fovStroke, "Color", "Accent")
+
+    local lighting = game:GetService("Lighting")
+    local origAmbient = lighting.Ambient
+    local origOutdoor = lighting.OutdoorAmbient
+    local origExposure = lighting.ExposureCompensation
+    local nightApplied = false
+
+    local cards = {}
+    local trackedHealth = {}
+
+    local function GetOrMakeCard(plr)
+        local c = cards[plr]
+        if c and c.Root and c.Root.Parent then return c end
+
+        local root = self:Create("Frame", {
+            Name = "ESP_" .. plr.Name,
+            BackgroundTransparency = 1,
+            Visible = false,
+            ZIndex = 55,
+            Parent = overlayFolder,
+        })
+
+        local box = self:Create("Frame", {
+            BackgroundTransparency = 1,
+            Size = UDim2.fromScale(1, 1),
+            ZIndex = 56,
+            Parent = root,
+        })
+        self:Create("UIStroke", {
+            Color = Color3.new(0, 0, 0),
+            Thickness = 2,
+            Transparency = 0.25,
+            Parent = box,
+        })
+        local boxStroke = self:Create("UIStroke", {
+            Color = self.Theme.Accent,
+            Thickness = 1,
+            Parent = box,
+        })
+
+        local nameLbl = self:Create("TextLabel", {
+            AnchorPoint = Vector2.new(0.5, 1),
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0.5, 0, 0, -2),
+            Size = UDim2.fromOffset(160, 13),
+            Font = Enum.Font.Code,
+            Text = plr.Name,
+            TextColor3 = self.Theme.Text,
+            TextSize = 11,
+            ZIndex = 57,
+            Parent = root,
+        })
+
+        local distLbl = self:Create("TextLabel", {
+            AnchorPoint = Vector2.new(0.5, 0),
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0.5, 0, 1, 2),
+            Size = UDim2.fromOffset(160, 12),
+            Font = Enum.Font.Code,
+            Text = "",
+            TextColor3 = self.Theme.TextDim,
+            TextSize = 10,
+            ZIndex = 57,
+            Parent = root,
+        })
+
+        local hpBg = self:Create("Frame", {
+            BackgroundColor3 = Color3.fromRGB(10, 10, 12),
+            BorderSizePixel = 0,
+            Position = UDim2.fromOffset(-6, 0),
+            Size = UDim2.new(0, 3, 1, 0),
+            ZIndex = 56,
+            Parent = root,
+        })
+        self:Create("UIStroke", { Color = Color3.new(0, 0, 0), Thickness = 1, Parent = hpBg })
+        local hpFill = self:Create("Frame", {
+            AnchorPoint = Vector2.new(0, 1),
+            BackgroundColor3 = self.Theme.Success,
+            BorderSizePixel = 0,
+            Position = UDim2.fromScale(0, 1),
+            Size = UDim2.fromScale(1, 1),
+            ZIndex = 57,
+            Parent = hpBg,
+        })
+
+        c = {
+            Root = root,
+            Box = box,
+            BoxStroke = boxStroke,
+            Name = nameLbl,
+            Dist = distLbl,
+            HpBg = hpBg,
+            HpFill = hpFill,
+            Highlight = nil,
+        }
+        cards[plr] = c
+        return c
+    end
+
+    local function HookCharacterHealth(plr, char)
+        if not char then return end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if not hum then return end
+        trackedHealth[plr] = hum.Health
+        self:Connect(hum.HealthChanged, function(newHp)
+            local oldHp = trackedHealth[plr] or hum.MaxHealth
+            trackedHealth[plr] = newHp
+            local diff = math.floor((oldHp - newHp) + 0.5)
+            if diff > 0 and (Library.Flags["ESP_Box"] or Library.Flags["ESP_Name"] or Library.Flags["Rage_Enabled"]) then
+                local rem = math.max(0, math.floor(newHp + 0.5))
+                Library:AddHitlog({
+                    Target = plr.Name,
+                    Hitbox = "chest",
+                    Damage = diff,
+                    Remaining = rem,
+                    Hitchance = Library.Flags["Rage_Hitchance"] or 84,
+                })
+                if Library.TargetHUD then
+                    Library.TargetHUD:SetTarget({
+                        Name = plr.Name,
+                        UserId = plr.UserId,
+                        HP = rem,
+                        MaxHP = math.floor(hum.MaxHealth + 0.5),
+                    })
+                end
+            end
+        end)
+    end
+
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer then
+            if plr.Character then HookCharacterHealth(plr, plr.Character) end
+            self:Connect(plr.CharacterAdded, function(ch)
+                task.wait(0.2)
+                HookCharacterHealth(plr, ch)
+            end)
+        end
+    end
+    self:Connect(Players.PlayerAdded, function(plr)
+        self:Connect(plr.CharacterAdded, function(ch)
+            task.wait(0.2)
+            HookCharacterHealth(plr, ch)
+        end)
+    end)
+    self:Connect(Players.PlayerRemoving, function(plr)
+        local c = cards[plr]
+        if c then
+            if c.Root then c.Root:Destroy() end
+            if c.Highlight then pcall(function() c.Highlight:Destroy() end) end
+            cards[plr] = nil
+        end
+        trackedHealth[plr] = nil
+    end)
+
+    self:Connect(RunService.RenderStepped, function()
+        if self.Unloaded then return end
+        local F = self.Flags
+        local cam = workspace.CurrentCamera
+        if not cam then return end
+
+        -- 1) FOV Circle
+        local showFov = (F["Rage_Enabled"] == true) or (F["Legit_Enable"] == true)
+        fovCircle.Visible = showFov
+        if showFov then
+            local mPos = UserInputService:GetMouseLocation()
+            local insetY = self:GetGuiInsetY()
+            local radius = F["Legit_Enable"] and ((tonumber(F["Legit_FOV"]) or 4.5) * 12) or ((tonumber(F["Rage_FOV"]) or 90) * 1.6)
+            local d = math.clamp(radius * 2, 24, 700)
+            fovCircle.Position = UDim2.fromOffset(mPos.X, mPos.Y - insetY)
+            fovCircle.Size = UDim2.fromOffset(d, d)
+        end
+
+        -- 2) World Nightmode & Camera Overrides
+        if F["World_Night"] then
+            nightApplied = true
+            local tint = F["World_Color"] or Color3.fromRGB(28, 28, 38)
+            lighting.Ambient = tint
+            lighting.OutdoorAmbient = tint
+            lighting.ExposureCompensation = tonumber(F["World_Exposure"]) or -1.2
+        elseif nightApplied then
+            nightApplied = false
+            lighting.Ambient = origAmbient
+            lighting.OutdoorAmbient = origOutdoor
+            lighting.ExposureCompensation = origExposure
+        end
+
+        -- 3) 2D Player Overlays & Chams Highlights
+        local anyESP = F["ESP_Box"] or F["ESP_Name"] or F["ESP_Health"] or F["ESP_Weapon"] or F["Chams_Vis"] or F["Chams_XQZ"]
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr ~= LocalPlayer then
+                local char = plr.Character
+                local hum = char and char:FindFirstChildOfClass("Humanoid")
+                local hrp = char and (char:FindFirstChild("HumanoidRootPart") or char.PrimaryPart)
+                if anyESP and char and hum and hrp and hum.Health > 0 then
+                    local c = GetOrMakeCard(plr)
+                    local topPos, onScreenTop = cam:WorldToViewportPoint(hrp.Position + Vector3.new(0, 2.8, 0))
+                    local botPos, onScreenBot = cam:WorldToViewportPoint(hrp.Position - Vector3.new(0, 3.2, 0))
+                    if (onScreenTop or onScreenBot) and topPos.Z > 0 then
+                        local h = math.clamp(math.abs(botPos.Y - topPos.Y), 16, 600)
+                        local w = math.clamp(h * 0.58, 12, 400)
+                        c.Root.Position = UDim2.fromOffset(math.floor(topPos.X - w * 0.5 + 0.5), math.floor(topPos.Y + 0.5))
+                        c.Root.Size = UDim2.fromOffset(math.floor(w + 0.5), math.floor(h + 0.5))
+                        c.Root.Visible = true
+
+                        c.Box.Visible = (F["ESP_Box"] == true)
+                        c.BoxStroke.Color = F["ESP_BoxColor"] or self.Theme.Accent
+
+                        c.Name.Visible = (F["ESP_Name"] == true)
+                        c.Name.TextColor3 = F["ESP_NameColor"] or self.Theme.Text
+                        c.Name.Text = string.format("%s [%d]", plr.Name, math.floor(hum.Health + 0.5))
+
+                        c.HpBg.Visible = (F["ESP_Health"] == true)
+                        local hpRatio = math.clamp(hum.Health / math.max(1, hum.MaxHealth), 0, 1)
+                        c.HpFill.Size = UDim2.fromScale(1, hpRatio)
+                        c.HpFill.BackgroundColor3 = Color3.fromHSV(hpRatio * 0.33, 0.85, 0.92)
+
+                        local tool = char:FindFirstChildOfClass("Tool")
+                        c.Dist.Visible = (F["ESP_Weapon"] == true)
+                        c.Dist.TextColor3 = F["ESP_WeaponColor"] or self.Theme.TextDim
+                        c.Dist.Text = tool and string.upper(tool.Name) or "UNARMED"
+                    else
+                        c.Root.Visible = false
+                    end
+
+                    -- Highlight Chams
+                    if F["Chams_Vis"] or F["Chams_XQZ"] then
+                        if not c.Highlight or not c.Highlight.Parent then
+                            local hl = Instance.new("Highlight")
+                            hl.Name = "ShardsChams"
+                            hl.Parent = char
+                            c.Highlight = hl
+                        end
+                        c.Highlight.Enabled = true
+                        c.Highlight.DepthMode = F["Chams_XQZ"] and Enum.HighlightDepthMode.AlwaysOnTop or Enum.HighlightDepthMode.Occluded
+                        c.Highlight.FillColor = F["Chams_Vis"] and (F["Chams_VisCol"] or self.Theme.Accent) or (F["Chams_XQZCol"] or self.Theme.Accent)
+                        c.Highlight.OutlineColor = F["ESP_GlowColor"] or Color3.new(0, 0, 0)
+                        c.Highlight.FillTransparency = 0.45
+                        c.Highlight.OutlineTransparency = F["ESP_Glow"] and 0.1 or 1
+                    elseif c.Highlight then
+                        c.Highlight.Enabled = false
+                    end
+                else
+                    local c = cards[plr]
+                    if c then
+                        c.Root.Visible = false
+                        if c.Highlight then c.Highlight.Enabled = false end
+                    end
+                end
+            end
+        end
+    end)
+
+    self.WorldController = { Folder = overlayFolder }
+    return self.WorldController
+end
+
+-- ============================================================================
 -- INLINE ATTACHMENTS (Keybind Binder & HSV/Alpha/Rainbow CS:GO ColorPicker)
 -- ============================================================================
 function Library:CreateKeybindAttachment(parentRow, cfg, toggleLink)
@@ -1822,20 +2632,12 @@ function Library:CreateKeybindAttachment(parentRow, cfg, toggleLink)
             Order = kbOrder,
             Active = isShown,
         }
-        if parentRow and parentRow.Name == "AttachTray" then
-            local totalW = 0
-            local visibleCount = 0
-            for _, ch in ipairs(parentRow:GetChildren()) do
-                if ch:IsA("GuiObject") and ch.Visible then
-                    visibleCount += 1
-                    totalW += ch.Size.X.Offset
-                end
-            end
-            totalW += math.max(0, visibleCount - 1) * 5
-            parentRow.Size = UDim2.fromOffset(math.max(85, totalW + 4), 16)
-        end
+        Library:RefreshAttachmentTray(parentRow)
         if self.KeybindList then
             self.KeybindList:Refresh()
+        end
+        if self.Indicators then
+            self.Indicators:Refresh()
         end
     end
 
@@ -2405,6 +3207,7 @@ function Library:CreateColorPickerAttachment(parentRow, cfg)
     end)
 
     ApplyColor()
+    Library:RefreshAttachmentTray(parentRow)
     Library.Options[flag] = ColorPicker
     return ColorPicker
 end
@@ -2585,6 +3388,9 @@ function GroupboxMethods:AddToggle(cfg)
         end
         if Library.ESPPreview then
             Library.ESPPreview:Refresh()
+        end
+        if Library.Indicators then
+            Library.Indicators:Refresh()
         end
         if cfg.Callback then
             task.spawn(cfg.Callback, state)
@@ -2828,6 +3634,9 @@ function GroupboxMethods:AddSlider(cfg)
         local pct = math.clamp((clamped - min) / math.max(0.0001, max - min), 0, 1)
         Library:Tween(fill, TweenFast, { Size = UDim2.fromScale(pct, 1) })
         valLabel.Text = FormatValue(clamped)
+        if Library.Indicators then
+            Library.Indicators:Refresh()
+        end
         if cfg.Callback then
             task.spawn(cfg.Callback, clamped)
         end
@@ -5419,6 +6228,20 @@ function Library:GetConfigJSON()
             }
         end
     end
+    local hudPositions = {}
+    for hudId, frame in pairs(self.HUDFrames) do
+        if frame and frame.Parent then
+            local p = frame.Position
+            hudPositions[hudId] = {
+                XS = p.X.Scale, XO = p.X.Offset,
+                YS = p.Y.Scale, YO = p.Y.Offset,
+            }
+        end
+    end
+    data["__HUDPositions"] = {
+        Type = "HUDPositions",
+        Positions = hudPositions,
+    }
     return HttpService:JSONEncode(data)
 end
 
@@ -5429,6 +6252,14 @@ function Library:LoadConfigJSON(jsonStr)
     if not ok or type(decoded) ~= "table" then
         self:Notify({ Title = "Config Error", Description = "Invalid JSON config payload.", Icon = "alert-triangle", Color = self.Theme.Risky })
         return false
+    end
+    if type(decoded["__HUDPositions"]) == "table" and type(decoded["__HUDPositions"].Positions) == "table" then
+        for hudId, pos in pairs(decoded["__HUDPositions"].Positions) do
+            local frame = self.HUDFrames[hudId]
+            if frame and frame.Parent and type(pos) == "table" then
+                frame.Position = UDim2.new(pos.XS or 0, pos.XO or 0, pos.YS or 0, pos.YO or 0)
+            end
+        end
     end
     for flag, entry in pairs(decoded) do
         local opt = self.Options[flag]
@@ -5488,6 +6319,24 @@ function Library:BuildConfigTab(tab)
         Default = false,
         Callback = function(v)
             if self.TargetHUD then self.TargetHUD:SetVisible(v) end
+        end
+    })
+
+    themeGroup:AddToggle({
+        Name = "Show Crosshair Indicators",
+        Flag = "UI_ShowIndicators",
+        Default = false,
+        Callback = function(v)
+            if self.Indicators then self.Indicators:SetVisible(v) end
+        end
+    })
+
+    themeGroup:AddToggle({
+        Name = "Show 2D Radar Window",
+        Flag = "UI_ShowRadar",
+        Default = false,
+        Callback = function(v)
+            if self.Radar then self.Radar:SetVisible(v) end
         end
     })
 
