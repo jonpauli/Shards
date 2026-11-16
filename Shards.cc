@@ -2169,13 +2169,6 @@ function Library:CreateIndicators()
                     Color = Library.Theme.Text,
                 })
             end
-            if F["Rage_NoSpread"] then
-                table.insert(activeList, {
-                    Id = "NOSPREAD",
-                    Text = "NOSPREAD",
-                    Color = Library.Theme.Success,
-                })
-            end
             if F["FL_Enable"] then
                 local choke = tonumber(F["FL_Limit"]) or 14
                 table.insert(activeList, {
@@ -2887,201 +2880,14 @@ function Library:CreateWorldController()
     local currentRagePart = nil
     local currentRagePos = nil
     local currentRagePlr = nil
+    local cachedCamPos = nil
     local isInternalRaycast = false
     local hasSilentHook = false
     local localMouse = LocalPlayer and LocalPlayer:GetMouse() or nil
     local vimService = nil
     pcall(function() vimService = game:GetService("VirtualInputManager") end)
 
-    -- Weapon Recoil & Spread Patching State (Counter Blox ReplicatedStorage.Weapons + Client senv + Universal Tools)
-    local savedRecoilVals = {}
-    local savedSpreadVals = {}
-    local savedRecoilAttrs = {}
-    local savedSpreadAttrs = {}
-    local savedGcRecoil = {}
-    local savedGcSpread = {}
-    local lastWeaponModScan = 0
-    local lastNoRecoilState = false
-    local lastNoSpreadState = false
-
-    local RecoilKeyLookup = {
-        recoil = true, recoilcontrol = true, recoilmin = true, recoilmax = true,
-        vrecoil = true, hrecoil = true, kick = true, camkick = true, camshake = true,
-        shake = true, anglex = true, angley = true, anglez = true, recoilpunch = true,
-        aimkick = true, viewkick = true, gunrecoil = true,
-    }
-    local SpreadKeyLookup = {
-        spread = true, minspread = true, maxspread = true, hipspread = true,
-        aimspread = true, movespread = true, jumpspread = true, inaccuracy = true,
-        bloom = true, spreadangle = true, crouch = true, jump = true, land = true,
-        ladder = true, move = true, stand = true, recoverytime = true,
-    }
-
-    local function RestoreRecoilMods()
-        for obj, orig in pairs(savedRecoilVals) do
-            if obj and obj.Parent then
-                pcall(function() obj.Value = orig end)
-            end
-        end
-        table.clear(savedRecoilVals)
-        for entry, orig in pairs(savedRecoilAttrs) do
-            if entry.Inst and entry.Inst.Parent then
-                pcall(function() entry.Inst:SetAttribute(entry.Attr, orig) end)
-            end
-        end
-        table.clear(savedRecoilAttrs)
-        for tbl, fields in pairs(savedGcRecoil) do
-            if type(tbl) == "table" then
-                for k, orig in pairs(fields) do
-                    pcall(rawset, tbl, k, orig)
-                end
-            end
-        end
-        table.clear(savedGcRecoil)
-    end
-
-    local function RestoreSpreadMods()
-        for obj, orig in pairs(savedSpreadVals) do
-            if obj and obj.Parent then
-                pcall(function() obj.Value = orig end)
-            end
-        end
-        table.clear(savedSpreadVals)
-        for entry, orig in pairs(savedSpreadAttrs) do
-            if entry.Inst and entry.Inst.Parent then
-                pcall(function() entry.Inst:SetAttribute(entry.Attr, orig) end)
-            end
-        end
-        table.clear(savedSpreadAttrs)
-        for tbl, fields in pairs(savedGcSpread) do
-            if type(tbl) == "table" then
-                for k, orig in pairs(fields) do
-                    pcall(rawset, tbl, k, orig)
-                end
-            end
-        end
-        table.clear(savedGcSpread)
-    end
-
-    local function PatchContainerDescendants(root, wantNoRecoil, wantNoSpread)
-        if not root then return end
-        for _, obj in ipairs(root:GetDescendants()) do
-            if obj:IsA("NumberValue") or obj:IsA("IntValue") or obj:IsA("Vector3Value") then
-                local lName = string.lower(obj.Name)
-                local pName = obj.Parent and string.lower(obj.Parent.Name) or ""
-                local isVec = obj:IsA("Vector3Value")
-                local zeroVal = isVec and Vector3.zero or 0
-
-                if wantNoRecoil and (pName == "recoil" or RecoilKeyLookup[lName]) then
-                    if savedRecoilVals[obj] == nil then
-                        savedRecoilVals[obj] = obj.Value
-                    end
-                    pcall(function() obj.Value = zeroVal end)
-                end
-
-                if wantNoSpread and (pName == "spread" or (SpreadKeyLookup[lName] and (pName == "spread" or not (lName == "crouch" or lName == "jump" or lName == "land" or lName == "ladder" or lName == "move" or lName == "stand")))) then
-                    if savedSpreadVals[obj] == nil then
-                        savedSpreadVals[obj] = obj.Value
-                    end
-                    pcall(function() obj.Value = zeroVal end)
-                end
-            end
-
-            if obj:IsA("Tool") or obj:IsA("Configuration") or obj:IsA("Folder") then
-                local okAttr, attrs = pcall(function() return obj:GetAttributes() end)
-                if okAttr and type(attrs) == "table" then
-                    for attrName, attrVal in pairs(attrs) do
-                        if type(attrVal) == "number" or typeof(attrVal) == "Vector3" then
-                            local lAttr = string.lower(attrName)
-                            local zeroAttr = typeof(attrVal) == "Vector3" and Vector3.zero or 0
-                            if wantNoRecoil and (RecoilKeyLookup[lAttr] or string.find(lAttr, "recoil") or string.find(lAttr, "kick")) then
-                                local found = false
-                                for entry in pairs(savedRecoilAttrs) do
-                                    if entry.Inst == obj and entry.Attr == attrName then found = true; break end
-                                end
-                                if not found then
-                                    savedRecoilAttrs[{ Inst = obj, Attr = attrName }] = attrVal
-                                end
-                                pcall(function() obj:SetAttribute(attrName, zeroAttr) end)
-                            end
-                            if wantNoSpread and (SpreadKeyLookup[lAttr] or string.find(lAttr, "spread") or string.find(lAttr, "inaccuracy") or string.find(lAttr, "bloom")) then
-                                local found = false
-                                for entry in pairs(savedSpreadAttrs) do
-                                    if entry.Inst == obj and entry.Attr == attrName then found = true; break end
-                                end
-                                if not found then
-                                    savedSpreadAttrs[{ Inst = obj, Attr = attrName }] = attrVal
-                                end
-                                pcall(function() obj:SetAttribute(attrName, zeroAttr) end)
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    local function SyncWeaponMods(wantNoRecoil, wantNoSpread)
-        if not wantNoRecoil and lastNoRecoilState then
-            RestoreRecoilMods()
-        end
-        if not wantNoSpread and lastNoSpreadState then
-            RestoreSpreadMods()
-        end
-
-        local stateChanged = (wantNoRecoil ~= lastNoRecoilState) or (wantNoSpread ~= lastNoSpreadState)
-        lastNoRecoilState = wantNoRecoil
-        lastNoSpreadState = wantNoSpread
-
-        if not wantNoRecoil and not wantNoSpread then
-            return
-        end
-
-        -- Counter Blox Client LocalScript environment (zero live recoil & currentspread every frame)
-        if LocalPlayer and getsenv then
-            pcall(function()
-                local pGui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
-                local clientScr = pGui and (pGui:FindFirstChild("Client") or pGui:FindFirstChild("MainClient"))
-                if clientScr then
-                    local senv = getsenv(clientScr)
-                    if type(senv) == "table" then
-                        if wantNoSpread then
-                            if senv.currentspread ~= nil then senv.currentspread = 0 end
-                            if senv.spread ~= nil and type(senv.spread) == "number" then senv.spread = 0 end
-                            if senv.Spread ~= nil and type(senv.Spread) == "number" then senv.Spread = 0 end
-                        end
-                        if wantNoRecoil then
-                            if senv.recoil ~= nil and type(senv.recoil) == "number" then senv.recoil = 0 end
-                            if senv.Recoil ~= nil and type(senv.Recoil) == "number" then senv.Recoil = 0 end
-                            if senv.shake ~= nil and type(senv.shake) == "number" then senv.shake = 0 end
-                        end
-                    end
-                end
-            end)
-        end
-
-        local now = os.clock()
-        if not stateChanged and (now - lastWeaponModScan) < 0.45 then
-            return
-        end
-        lastWeaponModScan = now
-
-        local repWeapons = game:GetService("ReplicatedStorage"):FindFirstChild("Weapons")
-        if repWeapons then
-            PatchContainerDescendants(repWeapons, wantNoRecoil, wantNoSpread)
-        end
-        if LocalPlayer then
-            if LocalPlayer.Character then
-                PatchContainerDescendants(LocalPlayer.Character, wantNoRecoil, wantNoSpread)
-            end
-            local bp = LocalPlayer:FindFirstChildOfClass("Backpack")
-            if bp then
-                PatchContainerDescendants(bp, wantNoRecoil, wantNoSpread)
-            end
-        end
-    end
-
-    -- Hook workspace raycasts, Camera rays & Mouse.Hit/Target for Silent Aim & No Spread in Counter Blox / Universal FPS
+    -- Hook workspace raycasts, Camera rays & Mouse.Hit/Target for true camera-free Silent Aim in Counter Blox
     pcall(function()
         if hookmetamethod and getnamecallmethod then
             local wrapClosure = newcclosure or function(fn) return fn end
@@ -3089,17 +2895,13 @@ function Library:CreateWorldController()
             oldNamecall = hookmetamethod(game, "__namecall", wrapClosure(function(selfObj, ...)
                 if not isInternalRaycast and not Library.Unloaded then
                     local F = Library.Flags
-                    local silentTargetPos = (F["Rage_Enabled"] == true and F["Rage_Silent"] == true)
+                    local targetPos = (F["Rage_Enabled"] == true and F["Rage_Silent"] == true)
                         and (currentSilentPos or (currentSilentPart and currentSilentPart.Parent and currentSilentPart.Position))
                         or nil
-                    local noSpreadActive = (F["Rage_NoSpread"] == true)
-                    local rageTargetPos = (F["Rage_Enabled"] == true and noSpreadActive)
-                        and (currentRagePos or (currentRagePart and currentRagePart.Parent and currentRagePart.Position))
-                        or nil
-                    local targetPos = silentTargetPos or rageTargetPos
-                    local targetPlr = silentTargetPos and currentSilentPlr or (rageTargetPos and currentRagePlr or nil)
-
-                    if targetPos or noSpreadActive then
+                    local targetPlr = targetPos and currentSilentPlr or nil
+                    local wc = Library.WorldController
+                    local hasCustomResolver = (not targetPos and wc and wc.ResolveBulletTarget ~= nil)
+                    if targetPos or hasCustomResolver then
                         local method = getnamecallmethod()
                         if selfObj == workspace then
                             if method == "FindPartOnRayWithIgnoreList"
@@ -3109,24 +2911,23 @@ function Library:CreateWorldController()
                                 local args = { ... }
                                 if typeof(args[1]) == "Ray" then
                                     local origRay = args[1]
-                                    -- Only redirect weapon bullet rays (length >= 35), ignoring short footstep/camera popper rays
-                                    if origRay.Direction.Magnitude >= 35 then
+                                    local len = origRay.Direction.Magnitude
+                                    -- Zero OP_NAMECALL calls inside hook so L->namecall is never overwritten before oldNamecall
+                                    if len >= 35 and origRay.Direction.Unit.Y > -0.95 and (not cachedCamPos or (origRay.Origin - cachedCamPos).Magnitude < 42) then
                                         local origin = origRay.Origin
-                                        if targetPos then
-                                            local vec = targetPos - origin
+                                        local resolvedPos, resolvedPlr = targetPos, targetPlr
+                                        if not resolvedPos and hasCustomResolver then
+                                            resolvedPos, resolvedPlr = wc.ResolveBulletTarget(origin, origRay.Direction)
+                                        end
+                                        if resolvedPos then
+                                            local vec = resolvedPos - origin
                                             if vec.Magnitude > 0.05 then
-                                                local len = math.max(origRay.Direction.Magnitude, vec.Magnitude + 50, 999)
-                                                args[1] = Ray.new(origin, vec.Unit * len)
+                                                local newLen = math.max(len, vec.Magnitude + 50, 999)
+                                                args[1] = Ray.new(origin, vec.Unit * newLen)
                                                 lastLocalShotTime = os.clock()
-                                                lastLocalShotTarget = targetPlr
-                                                return oldNamecall(selfObj, unpack(args))
-                                            end
-                                        elseif noSpreadActive then
-                                            local cam = workspace.CurrentCamera
-                                            if cam and (origin - cam.CFrame.Position).Magnitude < 18 then
-                                                local len = origRay.Direction.Magnitude
-                                                args[1] = Ray.new(origin, cam.CFrame.LookVector * len)
-                                                lastLocalShotTime = os.clock()
+                                                if resolvedPlr then
+                                                    lastLocalShotTarget = resolvedPlr
+                                                end
                                                 return oldNamecall(selfObj, unpack(args))
                                             end
                                         end
@@ -3134,32 +2935,37 @@ function Library:CreateWorldController()
                                 end
                             elseif method == "Raycast" then
                                 local args = { ... }
-                                if typeof(args[1]) == "Vector3" and typeof(args[2]) == "Vector3" and args[2].Magnitude >= 35 then
-                                    local origin = args[1]
-                                    if targetPos then
-                                        local vec = targetPos - origin
-                                        if vec.Magnitude > 0.05 then
-                                            local len = math.max(args[2].Magnitude, vec.Magnitude + 50, 999)
-                                            args[2] = vec.Unit * len
-                                            lastLocalShotTime = os.clock()
-                                            lastLocalShotTarget = targetPlr
-                                            return oldNamecall(selfObj, unpack(args))
+                                if typeof(args[1]) == "Vector3" and typeof(args[2]) == "Vector3" then
+                                    local len = args[2].Magnitude
+                                    if len >= 35 and args[2].Unit.Y > -0.95 and (not cachedCamPos or (args[1] - cachedCamPos).Magnitude < 42) then
+                                        local origin = args[1]
+                                        local resolvedPos, resolvedPlr = targetPos, targetPlr
+                                        if not resolvedPos and hasCustomResolver then
+                                            resolvedPos, resolvedPlr = wc.ResolveBulletTarget(origin, args[2])
                                         end
-                                    elseif noSpreadActive then
-                                        local cam = workspace.CurrentCamera
-                                        if cam and (origin - cam.CFrame.Position).Magnitude < 18 then
-                                            local len = args[2].Magnitude
-                                            args[2] = cam.CFrame.LookVector * len
-                                            lastLocalShotTime = os.clock()
-                                            return oldNamecall(selfObj, unpack(args))
+                                        if resolvedPos then
+                                            local vec = resolvedPos - origin
+                                            if vec.Magnitude > 0.05 then
+                                                local newLen = math.max(len, vec.Magnitude + 50, 999)
+                                                args[2] = vec.Unit * newLen
+                                                lastLocalShotTime = os.clock()
+                                                if resolvedPlr then
+                                                    lastLocalShotTarget = resolvedPlr
+                                                end
+                                                return oldNamecall(selfObj, unpack(args))
+                                            end
                                         end
                                     end
                                 end
                             end
                         elseif selfObj == workspace.CurrentCamera and (method == "ViewportPointToRay" or method == "ScreenPointToRay") then
-                            if targetPos then
-                                local camPos = selfObj.CFrame.Position
-                                local vec = targetPos - camPos
+                            local camPos = selfObj.CFrame.Position
+                            local resolvedPos = targetPos
+                            if not resolvedPos and hasCustomResolver then
+                                resolvedPos = wc.ResolveBulletTarget(camPos, selfObj.CFrame.LookVector * 500)
+                            end
+                            if resolvedPos then
+                                local vec = resolvedPos - camPos
                                 if vec.Magnitude > 0.05 then
                                     return Ray.new(camPos, vec.Unit)
                                 end
@@ -3174,11 +2980,14 @@ function Library:CreateWorldController()
             oldIndex = hookmetamethod(game, "__index", wrapClosure(function(selfObj, key)
                 if not isInternalRaycast and not Library.Unloaded and localMouse and selfObj == localMouse then
                     local F = Library.Flags
-                    local activePart = (F["Rage_Enabled"] == true and (F["Rage_Silent"] == true or F["Rage_NoSpread"] == true))
-                        and (currentSilentPart or currentRagePart)
-                        or nil
-                    if activePart and activePart.Parent then
-                        local targetPos = currentSilentPos or currentRagePos or activePart.Position
+                    local activePart = (F["Rage_Enabled"] == true and F["Rage_Silent"] == true) and currentSilentPart or nil
+                    local targetPos = activePart and (currentSilentPos or activePart.Position) or nil
+                    local wc = Library.WorldController
+                    if not targetPos and wc and wc.ResolveBulletTarget then
+                        targetPos = wc.ResolveBulletTarget()
+                        activePart = currentRagePart or activePart
+                    end
+                    if targetPos and activePart and activePart.Parent then
                         if key == "Hit" then
                             return CFrame.new(targetPos)
                         elseif key == "Target" then
@@ -3298,8 +3107,8 @@ function Library:CreateWorldController()
                 isInternalRaycast = false
                 return hit
             end
-            -- Pierce through invisible Counter Blox clip/trigger parts or non-cancollide barriers
-            if inst.Transparency >= 0.9 or not inst.CanCollide or string.find(string.lower(inst.Name), "clip") then
+            -- Pierce through invisible/semi-transparent Counter Blox clip/trigger/glass parts or non-cancollide barriers
+            if inst.Transparency >= 0.35 or not inst.CanCollide or string.find(string.lower(inst.Name), "clip") or string.find(string.lower(inst.Name), "glass") then
                 table.insert(ignore, inst)
                 params.FilterDescendantsInstances = ignore
             else
@@ -3867,20 +3676,30 @@ function Library:CreateWorldController()
                 table.insert(baseIgnore, mapFolder.Clips)
             end
 
-            local unitRay = cam:ViewportPointToRay(mPos.X, mPos.Y)
-            local hit = RaycastPierceClips(unitRay.Origin, unitRay.Direction * 900, baseIgnore)
-            local hitPos = hit and hit.Position or (unitRay.Origin + unitRay.Direction * 180)
-            lastLocalShotTarget = nil
-            if hit and hit.Instance then
-                for _, plr in ipairs(Players:GetPlayers()) do
-                    if plr ~= LocalPlayer and plr.Character and hit.Instance:IsDescendantOf(plr.Character) then
-                        lastLocalShotTarget = plr
-                        break
+            local silentPos = (self.Flags["Rage_Enabled"] == true and self.Flags["Rage_Silent"] == true)
+                and (currentSilentPos or (currentSilentPart and currentSilentPart.Parent and currentSilentPart.Position))
+                or nil
+            if silentPos and currentSilentPlr then
+                lastLocalShotTarget = currentSilentPlr
+                if self.Flags["World_Beams"] and (os.clock() - lastTracerSpawnTime) > 0.04 then
+                    SpawnTracer(silentPos)
+                end
+            else
+                local unitRay = cam:ViewportPointToRay(mPos.X, mPos.Y)
+                local hit = RaycastPierceClips(unitRay.Origin, unitRay.Direction * 900, baseIgnore)
+                local hitPos = hit and hit.Position or (unitRay.Origin + unitRay.Direction * 180)
+                lastLocalShotTarget = nil
+                if hit and hit.Instance then
+                    for _, plr in ipairs(Players:GetPlayers()) do
+                        if plr ~= LocalPlayer and plr.Character and hit.Instance:IsDescendantOf(plr.Character) then
+                            lastLocalShotTarget = plr
+                            break
+                        end
                     end
                 end
-            end
-            if self.Flags["World_Beams"] and (os.clock() - lastTracerSpawnTime) > 0.04 then
-                SpawnTracer(hitPos)
+                if self.Flags["World_Beams"] and (os.clock() - lastTracerSpawnTime) > 0.04 then
+                    SpawnTracer(hitPos)
+                end
             end
         end
     end)
@@ -4572,6 +4391,7 @@ function Library:CreateWorldController()
             local F = self.Flags
             local cam = workspace.CurrentCamera
             if not cam then return end
+            cachedCamPos = cam.CFrame.Position
             local mPos = UserInputService:GetMouseLocation()
             local myChar = LocalPlayer and LocalPlayer.Character
             local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
@@ -4589,14 +4409,10 @@ function Library:CreateWorldController()
                 cam.FieldOfView = origCamFov
             end
 
-            -- 1.5) Weapon No Recoil & No Spread Patching + Camera Shake / Kick Stabilization
+            -- 1.5) No Recoil & No Spread Flags
             local removals = type(F["World_Removals"]) == "table" and F["World_Removals"] or nil
             local wantNoRecoil = (F["Rage_NoRecoil"] == true) or (removals and removals["Visual Recoil"] == true) or false
             local wantNoSpread = (F["Rage_NoSpread"] == true)
-            SyncWeaponMods(wantNoRecoil, wantNoSpread)
-            if wantNoRecoil and myHum and myHum.CameraOffset.Magnitude > 0.001 then
-                myHum.CameraOffset = Vector3.zero
-            end
 
             -- 2) Combat Target Acquisition, Aimbot (Rage / Legit), AutoFire & Triggerbot
             local kbRage = self.Options["Rage_Key"]
@@ -4706,8 +4522,8 @@ function Library:CreateWorldController()
                     local dir = pt - origin
                     local hit = RaycastPierceClips(origin, dir, baseIgnore)
                     if not hit or hit.Instance:IsDescendantOf(char) then
-                        local req = math.min(minVisDmg, enemyHp)
-                        return baseDmg >= req, baseDmg
+                        -- Directly visible hitbox in line-of-sight: always valid even when AutoWall is off and MinDmg profile is high
+                        return true, math.max(baseDmg, minVisDmg)
                     end
                     if not allowWall then
                         return false, 0
@@ -4986,10 +4802,14 @@ function Library:CreateWorldController()
         WasRecentTracer = function()
             return (os.clock() - lastTracerSpawnTime) < 0.12
         end,
+        GetAimTarget = function()
+            return currentRagePart, currentRagePos, currentRagePlr
+        end,
+        GetLastShotTime = function()
+            return math.max(lastLocalShotTime, lastRageFire, lastTrigFire)
+        end,
         Cleanup = function()
             pcall(function() RunService:UnbindFromRenderStep("ShardsAspectStretch") end)
-            RestoreRecoilMods()
-            RestoreSpreadMods()
             for plr in pairs(playerConns) do
                 DisconnectPlayerConns(plr)
             end
