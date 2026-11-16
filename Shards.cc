@@ -1014,9 +1014,21 @@ function Library:CreateKeybindAttachment(parentRow, cfg, toggleLink)
             Parent = modePopup,
         })
         modeButtons[m] = mBtn
-        self:Connect(mBtn.MouseButton1Click, function()
-            Keybind:SetMode(m)
-            modePopup.Visible = false
+        self:Connect(mBtn.MouseEnter, function()
+            if m ~= mode then
+                Library:Tween(mBtn, TweenFast, { TextColor3 = self.Theme.Text })
+            end
+        end)
+        self:Connect(mBtn.MouseLeave, function()
+            if m ~= mode then
+                Library:Tween(mBtn, TweenFast, { TextColor3 = self.Theme.TextDim })
+            end
+        end)
+        self:Connect(mBtn.InputBegan, function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                Keybind:SetMode(m)
+                modePopup.Visible = false
+            end
         end)
     end
 
@@ -1053,19 +1065,41 @@ function Library:CreateKeybindAttachment(parentRow, cfg, toggleLink)
         Keybind.Changed:Fire(currentKey)
     end
 
-    self:Connect(btn.MouseButton1Click, function()
-        Library:ClosePopups(popupCtrl)
-        binding = true
-        btn.TextColor3 = self.Theme.Accent
-        UpdateButtonSize()
-    end)
-
-    self:Connect(btn.MouseButton2Click, function()
-        Library:ClosePopups(popupCtrl)
+    local function UpdateModePopupPos()
         local abs = btn.AbsolutePosition
         local insetY = self:GetGuiInsetY()
-        modePopup.Position = UDim2.fromOffset(abs.X, abs.Y + insetY + 20)
-        modePopup.Visible = not modePopup.Visible
+        local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1920, 1080)
+        local px = math.clamp(abs.X, 6, math.max(6, vp.X - 84))
+        local py = math.clamp(abs.Y + insetY + 18, 6, math.max(6, vp.Y - 66))
+        modePopup.Position = UDim2.fromOffset(px, py)
+    end
+
+    self:Connect(btn.InputBegan, function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            Library:ClosePopups(popupCtrl)
+            modePopup.Visible = false
+            binding = true
+            btn.TextColor3 = self.Theme.Accent
+            UpdateButtonSize()
+        elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+            binding = false
+            btn.TextColor3 = self.Theme.TextDim
+            UpdateButtonSize()
+            local willShow = not modePopup.Visible
+            Library:ClosePopups(popupCtrl)
+            if willShow then
+                UpdateModePopupPos()
+                modePopup.Visible = true
+            else
+                modePopup.Visible = false
+            end
+        end
+    end)
+
+    self:Connect(btn:GetPropertyChangedSignal("AbsolutePosition"), function()
+        if modePopup.Visible then
+            UpdateModePopupPos()
+        end
     end)
 
     self:Connect(UserInputService.InputBegan, function(input, gpe)
@@ -1434,7 +1468,8 @@ function Library:CreateColorPickerAttachment(parentRow, cfg)
         end
     end)
 
-    self:Connect(swatch.MouseButton1Click, function()
+    self:Connect(swatch.InputBegan, function(input)
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
         local willShow = not popup.Visible
         Library:ClosePopups(popupCtrl)
         if willShow then
@@ -3145,10 +3180,8 @@ function Library:CreateWindow(cfg)
     self:BindTheme(main, "BackgroundColor3", "Background")
     self:ApplyCSBorder(main, "HighlightBorder")
 
-    local winScale = self:Create("UIScale", {
-        Scale = 1,
-        Parent = main,
-    })
+    local openToken = 0
+    local savedWinPos = main.Position
 
     -- Classic CS:GO 2px Top Gradient Accent Strip
     self:CreateAccentBar(main, 10)
@@ -3326,15 +3359,22 @@ function Library:CreateWindow(cfg)
         Library.Open = state
         Library:ClosePopups()
         TooltipFrame.Visible = false
+        openToken += 1
+        local token = openToken
         if state then
             main.Visible = true
-            winScale.Scale = 0.95
-            Library:Tween(winScale, TweenMedium, { Scale = 1 })
+            main.Position = UDim2.new(savedWinPos.X.Scale, savedWinPos.X.Offset, savedWinPos.Y.Scale, savedWinPos.Y.Offset + 8)
+            Library:Tween(main, TweenMedium, { Position = savedWinPos })
+            Library:RefreshAllText()
         else
-            local tw = Library:Tween(winScale, TweenFast, { Scale = 0.95 })
+            savedWinPos = main.Position
+            Library:Tween(main, TweenFast, {
+                Position = UDim2.new(savedWinPos.X.Scale, savedWinPos.X.Offset, savedWinPos.Y.Scale, savedWinPos.Y.Offset + 6)
+            })
             task.delay(0.14, function()
-                if not Library.Open then
+                if openToken == token and not Library.Open then
                     main.Visible = false
+                    main.Position = savedWinPos
                 end
             end)
         end
