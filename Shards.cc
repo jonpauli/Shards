@@ -1309,55 +1309,55 @@ function Library:CreateSpectatorList()
             local key = sName .. "_" .. tostring(idx)
             seen[key] = true
 
-            local nw = self:GetTextBounds(sName, 12, Vector2.new(250, 20)).X
-            local mw = self:GetTextBounds(sMode, 11, Vector2.new(120, 20)).X
+            local nw = Library:GetTextBounds(sName, 12, Vector2.new(250, 20)).X
+            local mw = Library:GetTextBounds(sMode, 11, Vector2.new(120, 20)).X
             maxW = math.max(maxW, nw + mw + 36)
 
             local existing = specObj.Rows[key]
             if not existing or not existing.Row or not existing.Row.Parent then
-                local row = self:Create("Frame", {
+                local row = Library:Create("Frame", {
                     BackgroundTransparency = 1,
                     LayoutOrder = idx,
                     Size = UDim2.new(1, 0, 0, 16),
                     ZIndex = 278,
                     Parent = listHolder,
                 })
-                local dot = self:Create("Frame", {
+                local dot = Library:Create("Frame", {
                     AnchorPoint = Vector2.new(0, 0.5),
-                    BackgroundColor3 = self.Theme.Accent,
+                    BackgroundColor3 = Library.Theme.Accent,
                     BorderSizePixel = 0,
                     Position = UDim2.new(0, 0, 0.5, 0),
                     Size = UDim2.fromOffset(3, 3),
                     ZIndex = 279,
                     Parent = row,
                 })
-                self:BindTheme(dot, "BackgroundColor3", "Accent")
-                local nLbl = self:Create("TextLabel", {
+                Library:BindTheme(dot, "BackgroundColor3", "Accent")
+                local nLbl = Library:Create("TextLabel", {
                     BackgroundTransparency = 1,
                     Position = UDim2.fromOffset(8, 0),
                     Size = UDim2.new(0.68, -8, 1, 0),
                     Font = Enum.Font.Code,
                     Text = sName,
-                    TextColor3 = self.Theme.Text,
+                    TextColor3 = Library.Theme.Text,
                     TextSize = 12,
                     TextXAlignment = Enum.TextXAlignment.Left,
                     ZIndex = 278,
                     Parent = row,
                 })
-                self:BindTheme(nLbl, "TextColor3", "Text")
-                local mLbl = self:Create("TextLabel", {
+                Library:BindTheme(nLbl, "TextColor3", "Text")
+                local mLbl = Library:Create("TextLabel", {
                     BackgroundTransparency = 1,
                     Position = UDim2.fromScale(0.68, 0),
                     Size = UDim2.new(0.32, 0, 1, 0),
                     Font = Enum.Font.Code,
                     Text = sMode,
-                    TextColor3 = self.Theme.TextDim,
+                    TextColor3 = Library.Theme.TextDim,
                     TextSize = 11,
                     TextXAlignment = Enum.TextXAlignment.Right,
                     ZIndex = 278,
                     Parent = row,
                 })
-                self:BindTheme(mLbl, "TextColor3", "TextDim")
+                Library:BindTheme(mLbl, "TextColor3", "TextDim")
                 specObj.Rows[key] = { Row = row, NameLbl = nLbl, ModeLbl = mLbl }
             else
                 existing.Row.LayoutOrder = idx
@@ -1376,7 +1376,7 @@ function Library:CreateSpectatorList()
         local count = #entries
         listHolder.Size = UDim2.new(1, -16, 0, count * 19)
         local targetH = 30 + (count > 0 and (count * 19 + 4) or 0)
-        self:Tween(specFrame, TweenFast, { Size = UDim2.fromOffset(maxW, targetH) })
+        Library:Tween(specFrame, TweenFast, { Size = UDim2.fromOffset(maxW, targetH) })
     end
 
     function specObj:SetDemo(state)
@@ -1565,10 +1565,10 @@ function Library:CreateTargetHUD()
         flagBadge.Text = flags
         subInfoLbl.Text = string.format("%d HP  |  %d FT  |  HC: %d%%", hp, dist, hc)
         hpValLbl.Text = string.format("%d / %d", hp, maxHp)
-        self:Tween(hpFill, TweenFast, { Size = UDim2.fromScale(ratio, 1) })
+        Library:Tween(hpFill, TweenFast, { Size = UDim2.fromScale(ratio, 1) })
         task.delay(0.14, function()
             if hpTrail and hpTrail.Parent then
-                self:Tween(hpTrail, TweenMedium, { Size = UDim2.fromScale(ratio, 1) })
+                Library:Tween(hpTrail, TweenMedium, { Size = UDim2.fromScale(ratio, 1) })
             end
         end)
         hudObj.CurrentHP = hp
