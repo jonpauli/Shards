@@ -1877,18 +1877,45 @@ function GroupboxMethods:AddDropdown(cfg)
     })
     Library:BindTheme(chevron, "ImageColor3", "TextDim")
 
-    -- Floating Dropdown Menu
+    -- Connected Inline Dropdown Menu (expands smoothly directly out of the dropdown box as a single unified control)
     local dropMenu = Library:Create("Frame", {
         Name = "DropMenu_" .. name,
-        BackgroundColor3 = Library.Theme.Background,
-        Size = UDim2.fromOffset(180, 0),
-        ClipsDescendants = false,
+        BackgroundColor3 = Library.Theme.Element,
+        Position = UDim2.fromOffset(1, 37),
+        Size = UDim2.new(1, -2, 0, 0),
+        ClipsDescendants = true,
         Visible = false,
-        ZIndex = 340,
-        Parent = ScreenGui,
+        ZIndex = 20,
+        Parent = holder,
     })
-    Library:BindTheme(dropMenu, "BackgroundColor3", "Background")
-    Library:ApplyCSBorder(dropMenu, "HighlightBorder")
+    Library:BindTheme(dropMenu, "BackgroundColor3", "Element")
+    local dropStroke = Library:ApplyCSBorder(dropMenu, "InnerBorder")
+
+    -- Seamless Joint Bridge (hides the shared border line between the button and the expanded menu so both fuse into 1 box)
+    local seamBridge = Library:Create("Frame", {
+        Name = "SeamBridge",
+        BackgroundColor3 = Library.Theme.Element,
+        BorderSizePixel = 0,
+        Position = UDim2.fromOffset(2, 35),
+        Size = UDim2.new(1, -4, 0, 4),
+        Visible = false,
+        ZIndex = 22,
+        Parent = holder,
+    })
+    Library:BindTheme(seamBridge, "BackgroundColor3", "Element")
+
+    -- Subtle 1px inner divider between header and options
+    local seamDivider = Library:Create("Frame", {
+        BackgroundColor3 = Library.Theme.InnerBorder,
+        BorderSizePixel = 0,
+        Position = UDim2.fromOffset(6, 0),
+        Size = UDim2.new(1, -12, 0, 1),
+        ZIndex = 23,
+        Parent = dropMenu,
+    })
+    Library:BindTheme(seamDivider, "BackgroundColor3", "InnerBorder")
+
+    local closeToken = 0
 
     local popupCtrl = {
         Frames = { dropMenu, boxBtn },
@@ -1896,27 +1923,38 @@ function GroupboxMethods:AddDropdown(cfg)
             return opened and dropMenu.Visible
         end,
         Close = function()
+            if not opened and not dropMenu.Visible then return end
             opened = false
+            closeToken += 1
+            local token = closeToken
             Library:Tween(chevron, TweenFast, { Rotation = 0 })
             Library:Tween(boxStroke, TweenFast, { Color = Library.Theme.InnerBorder })
-            dropMenu.Visible = false
+            Library:Tween(dropStroke, TweenFast, { Color = Library.Theme.InnerBorder })
+            Library:Tween(dropMenu, TweenFast, { Size = UDim2.new(1, -2, 0, 0) })
+            Library:Tween(holder, TweenFast, { Size = UDim2.new(1, 0, 0, 38) })
+            task.delay(0.14, function()
+                if closeToken == token and not opened then
+                    dropMenu.Visible = false
+                    seamBridge.Visible = false
+                end
+            end)
         end
     }
     table.insert(Library.OpenPopups, popupCtrl)
 
     local searchBox
-    local listTopOffset = 2
+    local listTopOffset = 4
     if searchable then
-        listTopOffset = 25
+        listTopOffset = 27
         local searchHolder = Library:Create("Frame", {
-            BackgroundColor3 = Library.Theme.Element,
+            BackgroundColor3 = Library.Theme.Background,
             BorderSizePixel = 0,
-            Position = UDim2.fromOffset(3, 3),
-            Size = UDim2.new(1, -6, 0, 20),
-            ZIndex = 342,
+            Position = UDim2.fromOffset(4, 4),
+            Size = UDim2.new(1, -8, 0, 20),
+            ZIndex = 22,
             Parent = dropMenu,
         })
-        Library:BindTheme(searchHolder, "BackgroundColor3", "Element")
+        Library:BindTheme(searchHolder, "BackgroundColor3", "Background")
         Library:ApplyCSBorder(searchHolder, "InnerBorder")
 
         Library:Create("ImageLabel", {
@@ -1926,7 +1964,7 @@ function GroupboxMethods:AddDropdown(cfg)
             Size = UDim2.fromOffset(11, 11),
             Image = Library:GetIcon("search"),
             ImageColor3 = Library.Theme.TextMuted,
-            ZIndex = 343,
+            ZIndex = 23,
             Parent = searchHolder,
         })
 
@@ -1942,7 +1980,7 @@ function GroupboxMethods:AddDropdown(cfg)
             TextSize = 12,
             ClearTextOnFocus = false,
             TextXAlignment = Enum.TextXAlignment.Left,
-            ZIndex = 343,
+            ZIndex = 23,
             Parent = searchHolder,
         })
     end
@@ -1951,11 +1989,11 @@ function GroupboxMethods:AddDropdown(cfg)
         BackgroundTransparency = 1,
         BorderSizePixel = 0,
         Position = UDim2.fromOffset(2, listTopOffset),
-        Size = UDim2.new(1, -4, 1, -listTopOffset - 2),
+        Size = UDim2.new(1, -4, 1, -listTopOffset - 3),
         CanvasSize = UDim2.fromOffset(0, 0),
         ScrollBarThickness = 2,
         ScrollBarImageColor3 = Library.Theme.Accent,
-        ZIndex = 342,
+        ZIndex = 22,
         Parent = dropMenu,
     })
     Library:BindTheme(scroll, "ScrollBarImageColor3", "Accent")
@@ -1995,12 +2033,12 @@ function GroupboxMethods:AddDropdown(cfg)
                 local isSel = multi and (selected[optName] == true) or (selected == optName)
 
                 local itemBtn = Library:Create("TextButton", {
-                    BackgroundColor3 = isSel and Library.Theme.ElementHover or Library.Theme.Background,
+                    BackgroundColor3 = isSel and Library.Theme.ElementHover or Library.Theme.Element,
                     BackgroundTransparency = isSel and 0 or 1,
                     AutoButtonColor = false,
                     Size = UDim2.new(1, 0, 0, 20),
                     Text = "",
-                    ZIndex = 343,
+                    ZIndex = 23,
                     Parent = scroll,
                 })
 
@@ -2009,7 +2047,7 @@ function GroupboxMethods:AddDropdown(cfg)
                     BackgroundColor3 = Library.Theme.Accent,
                     BorderSizePixel = 0,
                     Size = isSel and UDim2.new(0, 2, 1, 0) or UDim2.new(0, 0, 1, 0),
-                    ZIndex = 344,
+                    ZIndex = 24,
                     Parent = itemBtn,
                 })
                 Library:BindTheme(selBar, "BackgroundColor3", "Accent")
@@ -2020,10 +2058,10 @@ function GroupboxMethods:AddDropdown(cfg)
                     textOffset = 24
                     local miniBox = Library:Create("Frame", {
                         AnchorPoint = Vector2.new(0, 0.5),
-                        BackgroundColor3 = isSel and Library.Theme.Accent or Library.Theme.Element,
+                        BackgroundColor3 = isSel and Library.Theme.Accent or Library.Theme.Background,
                         Position = UDim2.new(0, 7, 0.5, 0),
                         Size = UDim2.fromOffset(10, 10),
-                        ZIndex = 344,
+                        ZIndex = 24,
                         Parent = itemBtn,
                     })
                     Library:ApplyCSBorder(miniBox, isSel and "Accent" or "InnerBorder")
@@ -2038,9 +2076,26 @@ function GroupboxMethods:AddDropdown(cfg)
                     TextColor3 = isSel and Library.Theme.Accent or Library.Theme.TextDim,
                     TextSize = 12,
                     TextXAlignment = Enum.TextXAlignment.Left,
-                    ZIndex = 344,
+                    ZIndex = 24,
                     Parent = itemBtn,
                 })
+
+                Library:Connect(itemBtn.MouseEnter, function()
+                    if not isSel then
+                        Library:Tween(itemBtn, TweenFast, {
+                            BackgroundColor3 = Library.Theme.ElementHover,
+                            BackgroundTransparency = 0.35,
+                        })
+                        Library:Tween(itemLbl, TweenFast, { TextColor3 = Library.Theme.Text })
+                    end
+                end)
+
+                Library:Connect(itemBtn.MouseLeave, function()
+                    if not isSel then
+                        Library:Tween(itemBtn, TweenFast, { BackgroundTransparency = 1 })
+                        Library:Tween(itemLbl, TweenFast, { TextColor3 = Library.Theme.TextDim })
+                    end
+                end)
 
                 Library:Connect(itemBtn.MouseButton1Click, function()
                     if multi then
@@ -2074,7 +2129,7 @@ function GroupboxMethods:AddDropdown(cfg)
         end
 
         if shown == 0 then
-            local emptyLbl = Library:Create("TextButton", {
+            Library:Create("TextButton", {
                 BackgroundTransparency = 1,
                 AutoButtonColor = false,
                 Size = UDim2.new(1, 0, 0, 20),
@@ -2083,7 +2138,7 @@ function GroupboxMethods:AddDropdown(cfg)
                 TextColor3 = Library.Theme.TextMuted,
                 TextSize = 11,
                 TextXAlignment = Enum.TextXAlignment.Left,
-                ZIndex = 343,
+                ZIndex = 23,
                 Parent = scroll,
             })
             shown = 1
@@ -2091,14 +2146,16 @@ function GroupboxMethods:AddDropdown(cfg)
 
         local contentH = shown * 21
         scroll.CanvasSize = UDim2.fromOffset(0, contentH)
-        local menuH = math.clamp(math.max(20, contentH) + listTopOffset + 4, listTopOffset + 22, 165)
-        local menuW = math.max(140, boxBtn.AbsoluteSize.X)
+        local menuH = math.clamp(math.max(20, contentH) + listTopOffset + 4, listTopOffset + 22, 145)
         if opened then
             Library:Tween(dropMenu, TweenFast, {
-                Size = UDim2.fromOffset(menuW, menuH)
+                Size = UDim2.new(1, -2, 0, menuH)
+            })
+            Library:Tween(holder, TweenFast, {
+                Size = UDim2.new(1, 0, 0, 37 + menuH)
             })
         end
-        return menuH, menuW
+        return menuH
     end
 
     if searchBox then
@@ -2166,32 +2223,18 @@ function GroupboxMethods:AddDropdown(cfg)
         Library:Connect(Players.PlayerRemoving, SyncPlayers)
     end
 
-    local function PositionDropMenu()
-        local absPos = boxBtn.AbsolutePosition
-        local absSize = boxBtn.AbsoluteSize
-        local insetY = Library:GetGuiInsetY()
-        local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1920, 1080)
-        local shownCount = math.max(1, #values)
-        local estH = math.clamp(shownCount * 21 + listTopOffset + 4, listTopOffset + 22, 165)
-        local posY = absPos.Y + insetY + absSize.Y + 2
-        if posY + estH > vp.Y - 8 and (absPos.Y + insetY - estH - 2) > 8 then
-            posY = absPos.Y + insetY - estH - 2
-        end
-        dropMenu.Position = UDim2.fromOffset(absPos.X, posY)
-    end
-
     local function ToggleDropdown()
         local nextState = not opened
         Library:ClosePopups(popupCtrl)
         opened = nextState
         if opened then
-            local absSize = boxBtn.AbsoluteSize
-            local initW = math.max(140, absSize.X)
-            PositionDropMenu()
-            dropMenu.Size = UDim2.fromOffset(initW, 2)
+            closeToken += 1
+            dropMenu.Size = UDim2.new(1, -2, 0, 0)
             dropMenu.Visible = true
+            seamBridge.Visible = true
             Library:Tween(chevron, TweenFast, { Rotation = 180 })
             Library:Tween(boxStroke, TweenFast, { Color = Library.Theme.Accent })
+            Library:Tween(dropStroke, TweenFast, { Color = Library.Theme.Accent })
             RebuildItems()
         else
             popupCtrl.Close()
@@ -2204,11 +2247,6 @@ function GroupboxMethods:AddDropdown(cfg)
         end
     end)
 
-    Library:Connect(boxBtn:GetPropertyChangedSignal("AbsolutePosition"), function()
-        if opened and dropMenu.Visible then
-            PositionDropMenu()
-        end
-    end)
 
     UpdateDisplayText()
     RebuildItems()
