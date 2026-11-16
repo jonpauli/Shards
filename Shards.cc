@@ -346,8 +346,16 @@ local function GetSafeParent()
         local s, res = pcall(gethuiFn)
         if s and res then return res end
     end
-    local okCore, _ = pcall(function() return CoreGui.Name end)
+    local okCore = pcall(function()
+        local probe = Instance.new("Folder")
+        probe.Parent = CoreGui
+        probe:Destroy()
+    end)
     if okCore then return CoreGui end
+    if not LocalPlayer then
+        Players:GetPropertyChangedSignal("LocalPlayer"):Wait()
+        LocalPlayer = Players.LocalPlayer
+    end
     return LocalPlayer and LocalPlayer:WaitForChild("PlayerGui")
 end
 
@@ -577,7 +585,9 @@ function Library:CreateWatermark(customTitle)
     local fps = 60
     local accum = 0
     local frames = 0
-    local baseName = customTitle or self.Title
+    local baseName = (type(customTitle) == "table" and (customTitle.Title or customTitle.Name or customTitle.Text))
+        or customTitle
+        or self.Title
 
     self:Connect(RunService.RenderStepped, function(dt)
         frames += 1
@@ -606,6 +616,9 @@ function Library:CreateWatermark(customTitle)
     local wmObj = { Frame = wmFrame }
     function wmObj:SetVisible(v)
         wmFrame.Visible = v
+    end
+    function wmObj:SetTitle(newTitle)
+        baseName = tostring(newTitle or Library.Title)
     end
     self.Watermark = wmObj
     return wmObj
