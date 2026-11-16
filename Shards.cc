@@ -497,9 +497,11 @@ function Library:GetPlayerTelemetry(plr)
         end
     end
 
-    -- Counter Blox Armor / Helmet / Scoped / Flashed telemetry
+    -- Counter Blox Armor / Helmet / Scoped / Flashed / Ping / LC telemetry
     local hasArmor = false
     local hasHelmet = false
+    local isScoped = false
+    local isFlashed = false
     if nrpbs then
         local arm = nrpbs:FindFirstChild("Armor")
         local helm = nrpbs:FindFirstChild("Helmet")
@@ -511,6 +513,21 @@ function Library:GetPlayerTelemetry(plr)
     elseif char:FindFirstChild("Armor") then
         hasArmor = true
     end
+
+    if statusFolder then
+        local sc = statusFolder:FindFirstChild("Scoped") or statusFolder:FindFirstChild("ADS")
+        local fl = statusFolder:FindFirstChild("Flashed") or statusFolder:FindFirstChild("Blinded")
+        isScoped = (sc and sc.Value == true) or false
+        isFlashed = (fl and (fl.Value == true or (tonumber(fl.Value) or 0) > 0)) or false
+    end
+    if not isScoped and (string.find(weapName, "AWP") or string.find(weapName, "SCOUT") or string.find(weapName, "SSG") or string.find(weapName, "SCAR") or string.find(weapName, "G3SG1")) then
+        isScoped = (char:GetAttribute("Scoped") == true)
+    end
+
+    local velMag = 0
+    pcall(function()
+        velMag = Vector2.new(hrp.AssemblyLinearVelocity.X, hrp.AssemblyLinearVelocity.Z).Magnitude
+    end)
 
     local isTeammate = false
     if LocalPlayer then
@@ -534,6 +551,10 @@ function Library:GetPlayerTelemetry(plr)
         Weapon = weapName,
         HasArmor = hasArmor,
         HasHelmet = hasHelmet,
+        IsScoped = isScoped,
+        IsFlashed = isFlashed,
+        Speed = velMag,
+        BreakingLC = (velMag > 28),
         IsTeammate = isTeammate,
         TeamName = cbTeam or (plr.Team and plr.Team.Name) or "Enemy",
     }
@@ -2844,8 +2865,13 @@ function Library:CreateWorldController()
     local speedApplied = false
     local jumpApplied = false
     local noclipApplied = false
+    local aaApplied = false
+    local jitterFlip = false
+    local lastTrigFire = 0
     local noclipParts = {}
     local disabledPostEffects = {}
+    local suppressedSmokes = {}
+    local suppressedGuiOverlays = {}
 
     local ccEffect = Instance.new("ColorCorrectionEffect")
     ccEffect.Name = "ShardsColorCorrection"
@@ -3493,6 +3519,62 @@ function Library:CreateWorldController()
             table.clear(disabledPostEffects)
         end
 
+        -- Counter Blox Smoke Grenade Removal (workspace.Ray_Ignore.Smokes / workspace.Debris)
+        if removals["Smoke Grenades"] then
+            local rayIgnore = workspace:FindFirstChild("Ray_Ignore")
+            local smokesFolder = (rayIgnore and rayIgnore:FindFirstChild("Smokes")) or workspace:FindFirstChild("Debris")
+            if smokesFolder then
+                for _, d in ipairs(smokesFolder:GetDescendants()) do
+                    if d:IsA("ParticleEmitter") and d.Enabled then
+                        suppressedSmokes[d] = true
+                        d.Enabled = false
+                    elseif d:IsA("BasePart") and string.find(string.lower(d.Name), "smoke") and d.Transparency < 1 then
+                        suppressedSmokes[d] = d.Transparency
+                        d.Transparency = 1
+                    end
+                end
+            end
+        elseif next(suppressedSmokes) ~= nil then
+            for inst, prev in pairs(suppressedSmokes) do
+                if inst and inst.Parent then
+                    pcall(function()
+                        if inst:IsA("ParticleEmitter") then
+                            inst.Enabled = true
+                        elseif inst:IsA("BasePart") and type(prev) == "number" then
+                            inst.Transparency = prev
+                        end
+                    end)
+                end
+            end
+            table.clear(suppressedSmokes)
+        end
+
+        -- Counter Blox Flashbang & Scope Overlay Removals (PlayerGui)
+        local wantNoFlash = (removals["Flashbang Effect"] == true)
+        local wantNoScope = (removals["Scope Overlay"] == true)
+        if (wantNoFlash or wantNoScope) and LocalPlayer then
+            local pGui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+            if pGui then
+                for _, guiObj in ipairs(pGui:GetDescendants()) do
+                    if guiObj:IsA("GuiObject") and guiObj.Visible then
+                        local lName = string.lower(guiObj.Name)
+                        if (wantNoFlash and (lName == "blnd" or lName == "flash" or lName == "flashbang" or lName == "whiteout"))
+                            or (wantNoScope and (lName == "scope" or lName == "scopeframe" or lName == "sniperoverlay")) then
+                            suppressedGuiOverlays[guiObj] = true
+                            guiObj.Visible = false
+                        end
+                    end
+                end
+            end
+        elseif next(suppressedGuiOverlays) ~= nil then
+            for gObj in pairs(suppressedGuiOverlays) do
+                if gObj and gObj.Parent then
+                    pcall(function() gObj.Visible = true end)
+                end
+            end
+            table.clear(suppressedGuiOverlays)
+        end
+
         if ccEffect and ccEffect.Parent then
             if F["World_CC_Enabled"] then
                 ccEffect.Enabled = true
@@ -3589,6 +3671,184 @@ function Library:CreateWorldController()
                 local vel = myHrp.AssemblyLinearVelocity
                 if Vector2.new(vel.X, vel.Z).Magnitude > 2 then
                     myHrp.AssemblyLinearVelocity = Vector3.new(vel.X * 0.15, vel.Y, vel.Z * 0.15)
+                end
+            end
+
+            -- Anti-Aim Character Yaw & Jitter Controller
+            if F["AA_Enabled"] then
+                aaApplied = true
+                myHum.AutoRotate = false
+                local baseYaw = math.atan2(-cam.CFrame.LookVector.X, -cam.CFrame.LookVector.Z)
+                local yawMode = F["AA_YawBase"] or "Local View"
+                if yawMode ~= "Local View" then
+                    local bestTargetPos
+                    local bestMetric = math.huge
+                    for _, plr in ipairs(Players:GetPlayers()) do
+                        if plr ~= LocalPlayer then
+                            local tel = self:GetPlayerTelemetry(plr)
+                            if tel and tel.Alive and (not F["ESP_TeamCheck"] or not tel.IsTeammate) then
+                                if yawMode == "At Targets (Distance)" then
+                                    local d = (tel.RootPart.Position - myHrp.Position).Magnitude
+                                    if d < bestMetric then
+                                        bestMetric = d
+                                        bestTargetPos = tel.RootPart.Position
+                                    end
+                                else
+                                    local sp, onScr = cam:WorldToViewportPoint(tel.RootPart.Position)
+                                    if onScr and sp.Z > 0 then
+                                        local d2 = (Vector2.new(sp.X, sp.Y) - mPos).Magnitude
+                                        if d2 < bestMetric then
+                                            bestMetric = d2
+                                            bestTargetPos = tel.RootPart.Position
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                    if bestTargetPos then
+                        local dir = bestTargetPos - myHrp.Position
+                        baseYaw = math.atan2(-dir.X, -dir.Z)
+                    end
+                end
+                jitterFlip = not jitterFlip
+                local yawOffsetDeg = tonumber(F["AA_YawOffset"]) or 180
+                local jitterDeg = tonumber(F["AA_Jitter"]) or 0
+                local finalYaw = baseYaw + math.rad(yawOffsetDeg + (jitterFlip and jitterDeg or -jitterDeg))
+                myHrp.CFrame = CFrame.new(myHrp.Position) * CFrame.Angles(0, finalYaw, 0)
+            elseif aaApplied then
+                aaApplied = false
+                myHum.AutoRotate = true
+            end
+        end
+
+        -- 3.5) Combat Target Acquisition, Raycast Visibility, Aim Assist & Triggerbot
+        local rageActive = (F["Rage_Enabled"] == true) and (not self.ActiveKeybinds["Rage_Key"] or self.ActiveKeybinds["Rage_Key"].Active)
+        local legitActive = (F["Legit_Enable"] == true) and (not self.ActiveKeybinds["Legit_Key"] or self.ActiveKeybinds["Legit_Key"].Active)
+        local trigActive = (F["Trig_Enable"] == true) and (not self.ActiveKeybinds["Trig_Key"] or self.ActiveKeybinds["Trig_Key"].Active)
+
+        if rageActive or legitActive then
+            local fovLimitPx = legitActive and ((tonumber(F["Legit_FOV"]) or 4.5) * 12) or ((tonumber(F["Rage_FOV"]) or 180) * 1.6)
+            local dzPx = legitActive and ((tonumber(F["Legit_Deadzone"]) or 0) * 8) or 0
+            local priority = F["Rage_Priority"] or "FOV Closest"
+            local forceBaim = (F["Rage_ForceBaim"] == true) and (not self.ActiveKeybinds["Rage_BaimKey"] or self.ActiveKeybinds["Rage_BaimKey"].Active)
+            local allowWall = rageActive and (F["Rage_Autowall"] == true)
+            local hbMap = type(F["Rage_Hitboxes"]) == "table" and F["Rage_Hitboxes"] or nil
+
+            local rayParams = RaycastParams.new()
+            rayParams.FilterType = Enum.RaycastFilterType.Exclude
+            local ignoreList = { cam }
+            if myChar then table.insert(ignoreList, myChar) end
+            local rayIgnore = workspace:FindFirstChild("Ray_Ignore")
+            if rayIgnore then table.insert(ignoreList, rayIgnore) end
+            rayParams.FilterDescendantsInstances = ignoreList
+
+            local function ResolveTargetPart(char, tel)
+                if forceBaim then
+                    return char:FindFirstChild("LowerTorso") or char:FindFirstChild("Torso") or tel.RootPart
+                end
+                if hbMap and next(hbMap) ~= nil then
+                    if hbMap["Head"] and char:FindFirstChild("Head") then return char.Head end
+                    if (hbMap["Upper Chest"] or hbMap["Neck"]) and (char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")) then
+                        return char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
+                    end
+                    if hbMap["Pelvis"] and (char:FindFirstChild("LowerTorso") or tel.RootPart) then
+                        return char:FindFirstChild("LowerTorso") or tel.RootPart
+                    end
+                    if hbMap["Arms"] and (char:FindFirstChild("RightUpperArm") or char:FindFirstChild("Right Arm")) then
+                        return char:FindFirstChild("RightUpperArm") or char:FindFirstChild("Right Arm")
+                    end
+                    if (hbMap["Legs"] or hbMap["Feet"]) and (char:FindFirstChild("RightUpperLeg") or char:FindFirstChild("Right Leg")) then
+                        return char:FindFirstChild("RightUpperLeg") or char:FindFirstChild("Right Leg")
+                    end
+                end
+                return tel.Head or tel.RootPart
+            end
+
+            local bestAimPart = nil
+            local bestScore = math.huge
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if plr ~= LocalPlayer then
+                    local isWhitelisted = (F["Misc_Whitelist"] == true) and (F["Misc_PlayerTarget"] == plr.Name)
+                    local tel = self:GetPlayerTelemetry(plr)
+                    if not isWhitelisted and tel and tel.Alive and (not F["ESP_TeamCheck"] or not tel.IsTeammate) then
+                        local part = ResolveTargetPart(tel.Character, tel)
+                        if part then
+                            local sp, onScr = cam:WorldToViewportPoint(part.Position)
+                            if (onScr or rageActive) and sp.Z > 0 then
+                                local fovDist = (Vector2.new(sp.X, sp.Y) - mPos).Magnitude
+                                if fovDist <= fovLimitPx and fovDist >= dzPx then
+                                    local visible = allowWall
+                                    if not visible then
+                                        local dir = part.Position - cam.CFrame.Position
+                                        local hit = workspace:Raycast(cam.CFrame.Position, dir, rayParams)
+                                        visible = (not hit) or hit.Instance:IsDescendantOf(tel.Character)
+                                    end
+                                    if visible then
+                                        local score = fovDist
+                                        if rageActive then
+                                            if priority == "Lowest HP" then
+                                                score = tel.HP
+                                            elseif priority == "Shortest Distance" then
+                                                score = (part.Position - cam.CFrame.Position).Magnitude
+                                            elseif priority == "Highest Threat" then
+                                                score = (part.Position - cam.CFrame.Position).Magnitude * 0.5 + tel.HP
+                                            end
+                                        end
+                                        if score < bestScore then
+                                            bestScore = score
+                                            bestAimPart = part
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+
+            if bestAimPart then
+                local aimPos = bestAimPart.Position
+                if legitActive and F["Legit_RCS"] then
+                    aimPos = aimPos - Vector3.new(0, 0.18, 0)
+                end
+                local targetCF = CFrame.lookAt(cam.CFrame.Position, aimPos)
+                if rageActive then
+                    if F["Rage_QuickStop"] and myHrp and myHum and myHum.FloorMaterial ~= Enum.Material.Air then
+                        local v = myHrp.AssemblyLinearVelocity
+                        myHrp.AssemblyLinearVelocity = Vector3.new(v.X * 0.12, v.Y, v.Z * 0.12)
+                    end
+                    if F["Rage_Silent"] ~= true then
+                        cam.CFrame = cam.CFrame:Lerp(targetCF, 0.85)
+                    end
+                else
+                    local smooth = math.max(1, tonumber(F["Legit_Smooth"]) or 6.5)
+                    local alpha = math.clamp((1 / smooth) * (dt * 60), 0.03, 1)
+                    cam.CFrame = cam.CFrame:Lerp(targetCF, alpha)
+                end
+            end
+        end
+
+        if trigActive and (os.clock() - lastTrigFire) >= ((tonumber(F["Trig_Delay"]) or 35) / 1000) then
+            local rayParams = RaycastParams.new()
+            rayParams.FilterType = Enum.RaycastFilterType.Exclude
+            local ignoreList = { cam }
+            if myChar then table.insert(ignoreList, myChar) end
+            rayParams.FilterDescendantsInstances = ignoreList
+            local hit = workspace:Raycast(cam.CFrame.Position, cam.CFrame.LookVector * 600, rayParams)
+            if hit and hit.Instance then
+                for _, plr in ipairs(Players:GetPlayers()) do
+                    if plr ~= LocalPlayer and plr.Character and hit.Instance:IsDescendantOf(plr.Character) then
+                        local tel = self:GetPlayerTelemetry(plr)
+                        if tel and tel.Alive and (not F["ESP_TeamCheck"] or not tel.IsTeammate) then
+                            lastTrigFire = os.clock()
+                            local eqTool = myChar and myChar:FindFirstChildOfClass("Tool")
+                            if eqTool then
+                                pcall(function() eqTool:Activate() end)
+                            end
+                            break
+                        end
+                    end
                 end
             end
         end
@@ -3733,13 +3993,30 @@ function Library:CreateWorldController()
                         c.Dist.TextColor3 = F["ESP_WeaponColor"] or self.Theme.TextDim
                         c.Dist.Text = tel.Weapon
 
-                        -- Live Right-Side ESP Flags (Counter Blox Armor/Helmet/Distance/Ping aware)
+                        -- Live Right-Side ESP Flags (Counter Blox Armor/Helmet/Scoped/Flashed/LC/Distance/Ping aware)
                         for key, fl in pairs(c.FlagLabels) do
                             local enabled = activeFlags and (activeFlags[key] == true) or false
-                            if enabled and key == "Armor (HK)" then
-                                fl.Text = tel.HasHelmet and "HK" or (tel.HasArmor and "K" or "HK")
-                            elseif enabled and key == "Distance" then
-                                fl.Text = string.format("%dFT", math.floor(distStuds + 0.5))
+                            if enabled then
+                                if key == "Armor (HK)" then
+                                    fl.Text = tel.HasHelmet and "HK" or (tel.HasArmor and "K" or "HK")
+                                elseif key == "Scoped" then
+                                    fl.Text = "ZOOM"
+                                    enabled = tel.IsScoped or string.find(tel.Weapon, "AWP") ~= nil or string.find(tel.Weapon, "SCOUT") ~= nil or string.find(tel.Weapon, "SSG") ~= nil
+                                elseif key == "Flashed" then
+                                    fl.Text = "FLASH"
+                                    enabled = tel.IsFlashed
+                                elseif key == "Exploit / LC" then
+                                    fl.Text = "LC"
+                                    enabled = tel.BreakingLC
+                                elseif key == "Ping" then
+                                    local pingMs = 24
+                                    pcall(function()
+                                        pingMs = math.floor(game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue())
+                                    end)
+                                    fl.Text = string.format("%dMS", pingMs)
+                                elseif key == "Distance" then
+                                    fl.Text = string.format("%dFT", math.floor(distStuds + 0.5))
+                                end
                             end
                             fl.Visible = enabled
                         end
@@ -3983,6 +4260,30 @@ function Library:CreateWorldController()
                 end
             end
             table.clear(disabledPostEffects)
+            for inst, prev in pairs(suppressedSmokes) do
+                if inst and inst.Parent then
+                    pcall(function()
+                        if inst:IsA("ParticleEmitter") then
+                            inst.Enabled = true
+                        elseif inst:IsA("BasePart") and type(prev) == "number" then
+                            inst.Transparency = prev
+                        end
+                    end)
+                end
+            end
+            table.clear(suppressedSmokes)
+            for gObj in pairs(suppressedGuiOverlays) do
+                if gObj and gObj.Parent then
+                    pcall(function() gObj.Visible = true end)
+                end
+            end
+            table.clear(suppressedGuiOverlays)
+            if aaApplied then
+                aaApplied = false
+                local myChar = LocalPlayer and LocalPlayer.Character
+                local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
+                if myHum then myHum.AutoRotate = true end
+            end
             if nightApplied or fullbrightApplied then
                 nightApplied = false
                 fullbrightApplied = false
