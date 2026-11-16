@@ -359,13 +359,21 @@ local function GetSafeParent()
     return LocalPlayer and LocalPlayer:WaitForChild("PlayerGui")
 end
 
+local SafeParent = GetSafeParent()
+if SafeParent then
+    local oldGui = SafeParent:FindFirstChild("ShardsCSGO_UI")
+    if oldGui then
+        pcall(function() oldGui:Destroy() end)
+    end
+end
+
 local ScreenGui = Library:Create("ScreenGui", {
     Name = "ShardsCSGO_UI",
     ResetOnSpawn = false,
     IgnoreGuiInset = true,
     ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
     DisplayOrder = 999,
-    Parent = GetSafeParent(),
+    Parent = SafeParent,
 })
 Library.ScreenGui = ScreenGui
 
@@ -877,6 +885,7 @@ function Library:CreateKeybindAttachment(parentRow, cfg, toggleLink)
     self:Connect(UserInputService.InputBegan, function(input, gpe)
         if binding then
             if input.UserInputType == Enum.UserInputType.Keyboard then
+                if input.KeyCode == Enum.KeyCode.Unknown then return end
                 binding = false
                 btn.TextColor3 = self.Theme.TextDim
                 if input.KeyCode == Enum.KeyCode.Escape or input.KeyCode == Enum.KeyCode.Backspace then
@@ -884,14 +893,11 @@ function Library:CreateKeybindAttachment(parentRow, cfg, toggleLink)
                 else
                     Keybind:Set(input.KeyCode)
                 end
-            elseif input.UserInputType == Enum.UserInputType.MouseButton1
-                or input.UserInputType == Enum.UserInputType.MouseButton2
+            elseif input.UserInputType == Enum.UserInputType.MouseButton2
                 or input.UserInputType == Enum.UserInputType.MouseButton3 then
-                if not btn.GuiState or btn.GuiState ~= Enum.GuiState.Press then
-                    binding = false
-                    btn.TextColor3 = self.Theme.TextDim
-                    Keybind:Set(input.UserInputType)
-                end
+                binding = false
+                btn.TextColor3 = self.Theme.TextDim
+                Keybind:Set(input.UserInputType)
             end
             return
         end
@@ -1243,7 +1249,10 @@ function Library:CreateColorPickerAttachment(parentRow, cfg)
         Library:ClosePopups(popupCtrl)
         if willShow then
             local abs = swatch.AbsolutePosition
-            popup.Position = UDim2.fromOffset(abs.X - 185, abs.Y + 18)
+            local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1920, 1080)
+            local px = math.clamp(abs.X - 185, 6, math.max(6, vp.X - 225))
+            local py = math.clamp(abs.Y + 18, 6, math.max(6, vp.Y - 225))
+            popup.Position = UDim2.fromOffset(px, py)
             popup.Visible = true
         end
     end)
@@ -2034,6 +2043,14 @@ function GroupboxMethods:AddDropdown(cfg)
         end
     end)
 
+    Library:Connect(boxBtn:GetPropertyChangedSignal("AbsolutePosition"), function()
+        if opened and dropMenu.Visible then
+            local absPos = boxBtn.AbsolutePosition
+            local absSize = boxBtn.AbsoluteSize
+            dropMenu.Position = UDim2.fromOffset(absPos.X, absPos.Y + absSize.Y + 2)
+        end
+    end)
+
     UpdateDisplayText()
     RebuildItems()
     Library.Flags[flag] = selected
@@ -2188,6 +2205,8 @@ function GroupboxMethods:AddButton(cfg)
     Library:AddTooltip(row, cfg.Tooltip)
 
     local function BuildButtonInstance(btnCfg, xScale, widthScale, xOffset, widthOffset)
+        local bCfg = btnCfg or {}
+        local localConfirm = false
         local b = Library:Create("TextButton", {
             BackgroundColor3 = Library.Theme.Element,
             AutoButtonColor = false,
@@ -2223,16 +2242,16 @@ function GroupboxMethods:AddButton(cfg)
             Parent = content,
         })
 
-        if btnCfg.Icon then
+        if bCfg.Icon then
             local ic = Library:Create("ImageLabel", {
                 BackgroundTransparency = 1,
                 Size = UDim2.fromOffset(12, 12),
-                Image = Library:GetIcon(btnCfg.Icon),
-                ImageColor3 = btnCfg.Risky and Library.Theme.Risky or Library.Theme.Accent,
+                Image = Library:GetIcon(bCfg.Icon),
+                ImageColor3 = bCfg.Risky and Library.Theme.Risky or Library.Theme.Accent,
                 ZIndex = 12,
                 Parent = content,
             })
-            if not btnCfg.Risky then
+            if not bCfg.Risky then
                 Library:BindTheme(ic, "ImageColor3", "Accent")
             end
         end
@@ -2242,8 +2261,8 @@ function GroupboxMethods:AddButton(cfg)
             AutomaticSize = Enum.AutomaticSize.X,
             Size = UDim2.new(0, 0, 1, 0),
             Font = Enum.Font.Code,
-            Text = btnCfg.Name or "Button",
-            TextColor3 = btnCfg.Risky and Library.Theme.Risky or Library.Theme.Text,
+            Text = bCfg.Name or "Button",
+            TextColor3 = bCfg.Risky and Library.Theme.Risky or Library.Theme.Text,
             TextSize = 12,
             ZIndex = 12,
             Parent = content,
@@ -2252,35 +2271,35 @@ function GroupboxMethods:AddButton(cfg)
         Library:Connect(b.MouseEnter, function()
             Library:Tween(b, TweenFast, { BackgroundColor3 = Library.Theme.ElementHover })
             Library:Tween(bStroke, TweenFast, {
-                Color = btnCfg.Risky and Library.Theme.Risky or Library.Theme.Accent
+                Color = bCfg.Risky and Library.Theme.Risky or Library.Theme.Accent
             })
         end)
 
         Library:Connect(b.MouseLeave, function()
-            awaitingConfirm = false
-            lbl.Text = btnCfg.Name or "Button"
+            localConfirm = false
+            lbl.Text = bCfg.Name or "Button"
             Library:Tween(b, TweenFast, { BackgroundColor3 = Library.Theme.Element })
             Library:Tween(bStroke, TweenFast, { Color = Library.Theme.InnerBorder })
         end)
 
         Library:Connect(b.MouseButton1Click, function()
-            if btnCfg.Confirm and not awaitingConfirm then
-                awaitingConfirm = true
-                lbl.Text = "Confirm: " .. (btnCfg.Name or "Button") .. "?"
+            if bCfg.Confirm and not localConfirm then
+                localConfirm = true
+                lbl.Text = "Confirm: " .. (bCfg.Name or "Button") .. "?"
                 return
             end
-            awaitingConfirm = false
-            lbl.Text = btnCfg.Name or "Button"
+            localConfirm = false
+            lbl.Text = bCfg.Name or "Button"
             Library:Tween(b, TweenInfo.new(0.07, Enum.EasingStyle.Quad), {
-                BackgroundColor3 = btnCfg.Risky and Library.Theme.Risky or Library.Theme.AccentDark
+                BackgroundColor3 = bCfg.Risky and Library.Theme.Risky or Library.Theme.AccentDark
             })
             task.delay(0.09, function()
                 if b and b.Parent then
                     Library:Tween(b, TweenFast, { BackgroundColor3 = Library.Theme.ElementHover })
                 end
             end)
-            if btnCfg.Callback then
-                task.spawn(btnCfg.Callback)
+            if bCfg.Callback then
+                task.spawn(bCfg.Callback)
             end
         end)
         return b, lbl
@@ -3038,10 +3057,10 @@ function Library:CreateWindow(cfg)
     end
 
     function Window:Toggle()
-        self:SetOpen(not Library.Open)
+        Window:SetOpen(not Library.Open)
     end
 
-    self:Connect(UserInputService.InputBegan, function(input, gpe)
+    Library:Connect(UserInputService.InputBegan, function(input, gpe)
         if not gpe and input.KeyCode == self.ToggleKey then
             Window:Toggle()
         end
@@ -3299,7 +3318,11 @@ function Library:LoadConfigJSON(jsonStr)
             if entry.Type == "ColorPicker" and entry.R then
                 opt:Set(Color3.new(entry.R, entry.G, entry.B), entry.Alpha or 0)
             elseif entry.Type == "Keybind" and entry.Key then
-                local kc = Enum.KeyCode[entry.Key] or Enum.UserInputType[entry.Key] or Enum.KeyCode.Unknown
+                local kc = Enum.KeyCode.Unknown
+                pcall(function() kc = Enum.KeyCode[entry.Key] end)
+                if kc == Enum.KeyCode.Unknown then
+                    pcall(function() kc = Enum.UserInputType[entry.Key] end)
+                end
                 opt:Set(kc)
                 if entry.Mode then opt:SetMode(entry.Mode) end
             elseif opt.Set then
@@ -3342,7 +3365,11 @@ function Library:BuildConfigTab(tab)
                 self.ToggleKey = newKey
             end
         end
-    })
+    }).Changed:Connect(function(newKey)
+        if typeof(newKey) == "EnumItem" and newKey.EnumType == Enum.KeyCode and newKey ~= Enum.KeyCode.Unknown then
+            self.ToggleKey = newKey
+        end
+    end)
 
     themeGroup:AddDivider("Accent & Presets", "sparkles")
 
