@@ -779,6 +779,163 @@ function Library:Notify(cfg)
 end
 
 -- ============================================================================
+-- TOP-LEFT CS:GO / GAMESENSE CONSOLE HITLOG OVERLAY
+-- ============================================================================
+local HitlogHolder = Library:Create("Frame", {
+    Name = "HitlogOverlay",
+    BackgroundTransparency = 1,
+    Position = UDim2.fromOffset(10, 8),
+    Size = UDim2.fromOffset(650, 260),
+    ZIndex = 390,
+    Parent = ScreenGui,
+})
+Library:Create("UIListLayout", {
+    Padding = UDim.new(0, 2),
+    SortOrder = Enum.SortOrder.LayoutOrder,
+    Parent = HitlogHolder,
+})
+
+local function ToRichHex(col)
+    return string.format("#%02X%02X%02X",
+        math.clamp(math.floor(col.R * 255 + 0.5), 0, 255),
+        math.clamp(math.floor(col.G * 255 + 0.5), 0, 255),
+        math.clamp(math.floor(col.B * 255 + 0.5), 0, 255)
+    )
+end
+
+local hitlogCounter = 0
+function Library:AddHitlog(cfg)
+    cfg = type(cfg) == "string" and { Text = cfg } or (cfg or {})
+    hitlogCounter += 1
+    local duration = cfg.Duration or 5
+    local prefix = cfg.Prefix or ("[" .. (self.Title or "shards.cc") .. "]")
+    local accentCol = cfg.Color or (cfg.Miss and self.Theme.Risky or self.Theme.Accent)
+    local accentHex = ToRichHex(accentCol)
+    local textHex = ToRichHex(self.Theme.Text)
+    local dimHex = ToRichHex(self.Theme.TextDim)
+    local riskyHex = ToRichHex(self.Theme.Risky)
+
+    local richStr
+    if cfg.Target then
+        local target = tostring(cfg.Target)
+        local hitbox = string.lower(tostring(cfg.Hitbox or "head"))
+        if cfg.Miss then
+            local reason = tostring(cfg.Reason or "spread")
+            local hc = cfg.Hitchance and (" | hc: " .. tostring(cfg.Hitchance) .. "%") or ""
+            richStr = string.format(
+                '<font color="%s">%s</font> <font color="%s">Missed</font> <font color="%s">%s</font><font color="%s">\'s</font> <font color="%s">%s</font> <font color="%s">due to</font> <font color="%s">%s</font><font color="%s">%s</font>',
+                riskyHex, prefix,
+                textHex,
+                accentHex, target,
+                dimHex,
+                textHex, hitbox,
+                dimHex,
+                riskyHex, reason,
+                dimHex, hc
+            )
+        else
+            local dmg = tonumber(cfg.Damage) or 100
+            local rem = math.max(0, tonumber(cfg.Remaining) or math.max(0, 100 - dmg))
+            local bt = cfg.Backtrack and (" | bt: " .. tostring(cfg.Backtrack) .. "t") or ""
+            local hc = cfg.Hitchance and (" | hc: " .. tostring(cfg.Hitchance) .. "%") or ""
+            richStr = string.format(
+                '<font color="%s">%s</font> <font color="%s">Hurt</font> <font color="%s">%s</font> <font color="%s">in the</font> <font color="%s">%s</font> <font color="%s">for</font> <font color="%s">%d</font> <font color="%s">damage (</font><font color="%s">%d</font> <font color="%s">hp remaining%s%s)</font>',
+                accentHex, prefix,
+                textHex,
+                accentHex, target,
+                dimHex,
+                accentHex, hitbox,
+                dimHex,
+                accentHex, dmg,
+                dimHex,
+                rem == 0 and riskyHex or textHex, rem,
+                dimHex, hc, bt
+            )
+        end
+    else
+        richStr = string.format(
+            '<font color="%s">%s</font> <font color="%s">%s</font>',
+            accentHex, prefix,
+            textHex, tostring(cfg.Text or cfg.Description or "event logged")
+        )
+    end
+
+    local row = self:Create("Frame", {
+        BackgroundTransparency = 1,
+        LayoutOrder = hitlogCounter,
+        Size = UDim2.new(1, 0, 0, 15),
+        ZIndex = 391,
+        Parent = HitlogHolder,
+    })
+
+    local bar = self:Create("Frame", {
+        BackgroundColor3 = accentCol,
+        BorderSizePixel = 0,
+        Position = UDim2.fromOffset(-12, 2),
+        Size = UDim2.fromOffset(2, 11),
+        BackgroundTransparency = 1,
+        ZIndex = 392,
+        Parent = row,
+    })
+
+    local line = self:Create("TextLabel", {
+        BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(-8, 0),
+        Size = UDim2.new(1, 0, 1, 0),
+        Font = Enum.Font.Code,
+        RichText = true,
+        Text = richStr,
+        TextColor3 = self.Theme.Text,
+        TextSize = 12,
+        TextTransparency = 1,
+        TextStrokeColor3 = Color3.new(0, 0, 0),
+        TextStrokeTransparency = 1,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 392,
+        Parent = row,
+    })
+
+    self:Tween(bar, TweenFast, {
+        Position = UDim2.fromOffset(0, 2),
+        BackgroundTransparency = 0,
+    })
+    self:Tween(line, TweenFast, {
+        Position = UDim2.fromOffset(6, 0),
+        TextTransparency = 0,
+        TextStrokeTransparency = 0.15,
+    })
+
+    -- Cap active lines to 10 so rapid fire never overflows the screen
+    local children = {}
+    for _, ch in ipairs(HitlogHolder:GetChildren()) do
+        if ch:IsA("Frame") then
+            table.insert(children, ch)
+        end
+    end
+    if #children > 10 then
+        table.sort(children, function(a, b) return a.LayoutOrder < b.LayoutOrder end)
+        for i = 1, #children - 10 do
+            children[i]:Destroy()
+        end
+    end
+
+    task.delay(duration, function()
+        if not row or not row.Parent then return end
+        self:Tween(bar, TweenMedium, {
+            Position = UDim2.fromOffset(-10, 2),
+            BackgroundTransparency = 1,
+        })
+        self:Tween(line, TweenMedium, {
+            Position = UDim2.fromOffset(-6, 0),
+            TextTransparency = 1,
+            TextStrokeTransparency = 1,
+        })
+        task.wait(0.24)
+        if row and row.Parent then row:Destroy() end
+    end)
+end
+
+-- ============================================================================
 -- FLOATING WATERMARK & KEYBIND LIST (Classic CS:GO HUD panels)
 -- ============================================================================
 function Library:CreateWatermark(customTitle)
@@ -1035,6 +1192,425 @@ function Library:CreateKeybindList()
 
     self.KeybindList = kbObj
     return kbObj
+end
+
+function Library:CreateSpectatorList()
+    local specFrame = self:Create("Frame", {
+        Name = "SpectatorList",
+        BackgroundColor3 = self.Theme.Background,
+        Position = UDim2.new(0, 16, 0.62, 0),
+        Size = UDim2.fromOffset(185, 28),
+        ZIndex = 275,
+        Parent = ScreenGui,
+    })
+    self:BindTheme(specFrame, "BackgroundColor3", "Background")
+    self:ApplyCSBorder(specFrame, "InnerBorder")
+    self:CreateAccentBar(specFrame, 277)
+    self:MakeDraggable(specFrame, specFrame)
+
+    local hdrIcon = self:Create("ImageLabel", {
+        BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(8, 7),
+        Size = UDim2.fromOffset(13, 13),
+        Image = self:GetIcon("eye"),
+        ImageColor3 = self.Theme.Accent,
+        ZIndex = 277,
+        Parent = specFrame,
+    })
+    self:BindTheme(hdrIcon, "ImageColor3", "Accent")
+
+    local hdrTitle = self:Create("TextLabel", {
+        BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(26, 2),
+        Size = UDim2.new(1, -30, 0, 22),
+        Font = Enum.Font.GothamBold,
+        Text = "SPECTATORS (0)",
+        TextColor3 = self.Theme.Text,
+        TextSize = 11,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 277,
+        Parent = specFrame,
+    })
+    self:BindTheme(hdrTitle, "TextColor3", "Text")
+
+    local sep = self:Create("Frame", {
+        BackgroundColor3 = self.Theme.InnerBorder,
+        BorderSizePixel = 0,
+        Position = UDim2.fromOffset(0, 25),
+        Size = UDim2.new(1, 0, 0, 1),
+        ZIndex = 277,
+        Parent = specFrame,
+    })
+    self:BindTheme(sep, "BackgroundColor3", "InnerBorder")
+
+    local listHolder = self:Create("Frame", {
+        BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(8, 28),
+        Size = UDim2.new(1, -16, 0, 0),
+        ZIndex = 277,
+        Parent = specFrame,
+    })
+    self:Create("UIListLayout", {
+        Padding = UDim.new(0, 3),
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Parent = listHolder,
+    })
+
+    local specObj = {
+        Frame = specFrame,
+        Rows = {},
+        CustomEntries = {},
+        DemoMode = false,
+    }
+
+    local demoList = {
+        { Name = "s1mple",   Mode = "1st" },
+        { Name = "donk666",  Mode = "1st" },
+        { Name = "m0NESY",   Mode = "free" },
+    }
+
+    function specObj:Refresh(list)
+        local entries = list
+        if not entries then
+            entries = {}
+            if specObj.DemoMode then
+                for _, d in ipairs(demoList) do
+                    table.insert(entries, d)
+                end
+            end
+            for _, c in ipairs(specObj.CustomEntries) do
+                table.insert(entries, c)
+            end
+            local cam = workspace.CurrentCamera
+            local myChar = LocalPlayer and LocalPlayer.Character
+            local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if plr ~= LocalPlayer then
+                    local isWatching = false
+                    pcall(function()
+                        if cam and myHum and plr:DistanceFromCharacter(myChar:GetPivot().Position) < 4 and not plr.Character then
+                            isWatching = true
+                        end
+                    end)
+                    if isWatching then
+                        table.insert(entries, { Name = plr.Name, Mode = "cam" })
+                    end
+                end
+            end
+        end
+
+        hdrTitle.Text = string.format("SPECTATORS (%d)", #entries)
+        local seen = {}
+        local maxW = 185
+
+        for idx, item in ipairs(entries) do
+            local sName = type(item) == "table" and tostring(item.Name or "Player") or tostring(item)
+            local sMode = type(item) == "table" and ("[" .. string.lower(tostring(item.Mode or "1st")) .. "]") or "[1st]"
+            local key = sName .. "_" .. tostring(idx)
+            seen[key] = true
+
+            local nw = self:GetTextBounds(sName, 12, Vector2.new(250, 20)).X
+            local mw = self:GetTextBounds(sMode, 11, Vector2.new(120, 20)).X
+            maxW = math.max(maxW, nw + mw + 36)
+
+            local existing = specObj.Rows[key]
+            if not existing or not existing.Row or not existing.Row.Parent then
+                local row = self:Create("Frame", {
+                    BackgroundTransparency = 1,
+                    LayoutOrder = idx,
+                    Size = UDim2.new(1, 0, 0, 16),
+                    ZIndex = 278,
+                    Parent = listHolder,
+                })
+                local dot = self:Create("Frame", {
+                    AnchorPoint = Vector2.new(0, 0.5),
+                    BackgroundColor3 = self.Theme.Accent,
+                    BorderSizePixel = 0,
+                    Position = UDim2.new(0, 0, 0.5, 0),
+                    Size = UDim2.fromOffset(3, 3),
+                    ZIndex = 279,
+                    Parent = row,
+                })
+                self:BindTheme(dot, "BackgroundColor3", "Accent")
+                local nLbl = self:Create("TextLabel", {
+                    BackgroundTransparency = 1,
+                    Position = UDim2.fromOffset(8, 0),
+                    Size = UDim2.new(0.68, -8, 1, 0),
+                    Font = Enum.Font.Code,
+                    Text = sName,
+                    TextColor3 = self.Theme.Text,
+                    TextSize = 12,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    ZIndex = 278,
+                    Parent = row,
+                })
+                self:BindTheme(nLbl, "TextColor3", "Text")
+                local mLbl = self:Create("TextLabel", {
+                    BackgroundTransparency = 1,
+                    Position = UDim2.fromScale(0.68, 0),
+                    Size = UDim2.new(0.32, 0, 1, 0),
+                    Font = Enum.Font.Code,
+                    Text = sMode,
+                    TextColor3 = self.Theme.TextDim,
+                    TextSize = 11,
+                    TextXAlignment = Enum.TextXAlignment.Right,
+                    ZIndex = 278,
+                    Parent = row,
+                })
+                self:BindTheme(mLbl, "TextColor3", "TextDim")
+                specObj.Rows[key] = { Row = row, NameLbl = nLbl, ModeLbl = mLbl }
+            else
+                existing.Row.LayoutOrder = idx
+                existing.NameLbl.Text = sName
+                existing.ModeLbl.Text = sMode
+            end
+        end
+
+        for k, entry in pairs(specObj.Rows) do
+            if not seen[k] then
+                if entry.Row and entry.Row.Parent then entry.Row:Destroy() end
+                specObj.Rows[k] = nil
+            end
+        end
+
+        local count = #entries
+        listHolder.Size = UDim2.new(1, -16, 0, count * 19)
+        local targetH = 30 + (count > 0 and (count * 19 + 4) or 0)
+        self:Tween(specFrame, TweenFast, { Size = UDim2.fromOffset(maxW, targetH) })
+    end
+
+    function specObj:SetDemo(state)
+        specObj.DemoMode = (state == true)
+        specObj:Refresh()
+    end
+
+    function specObj:SetCustom(entries)
+        specObj.CustomEntries = type(entries) == "table" and entries or {}
+        specObj:Refresh()
+    end
+
+    function specObj:SetVisible(v)
+        specFrame.Visible = (v == true)
+    end
+
+    specObj:Refresh()
+    self.SpectatorList = specObj
+    return specObj
+end
+
+function Library:CreateTargetHUD()
+    local hudFrame = self:Create("Frame", {
+        Name = "TargetHUD",
+        AnchorPoint = Vector2.new(0.5, 0),
+        BackgroundColor3 = self.Theme.Background,
+        Position = UDim2.new(0.5, 0, 0.72, 0),
+        Size = UDim2.fromOffset(236, 66),
+        Visible = true,
+        ZIndex = 270,
+        Parent = ScreenGui,
+    })
+    self:BindTheme(hudFrame, "BackgroundColor3", "Background")
+    self:ApplyCSBorder(hudFrame, "HighlightBorder")
+    self:CreateAccentBar(hudFrame, 272)
+    self:MakeDraggable(hudFrame, hudFrame)
+
+    -- Avatar / Silhouette Thumbnail Box
+    local thumbBox = self:Create("Frame", {
+        BackgroundColor3 = self.Theme.Element,
+        Position = UDim2.fromOffset(8, 10),
+        Size = UDim2.fromOffset(46, 46),
+        ZIndex = 271,
+        Parent = hudFrame,
+    })
+    self:BindTheme(thumbBox, "BackgroundColor3", "Element")
+    self:ApplyCSBorder(thumbBox, "InnerBorder")
+
+    local avatarImg = self:Create("ImageLabel", {
+        BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(1, 1),
+        Size = UDim2.new(1, -2, 1, -2),
+        Image = "rbxthumb://type=AvatarHeadShot&id=" .. tostring(LocalPlayer and LocalPlayer.UserId or 1) .. "&w=150&h=150",
+        ZIndex = 272,
+        Parent = thumbBox,
+    })
+
+    local targetIcon = self:Create("ImageLabel", {
+        BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(62, 10),
+        Size = UDim2.fromOffset(12, 12),
+        Image = self:GetIcon("locate-fixed"),
+        ImageColor3 = self.Theme.Accent,
+        ZIndex = 272,
+        Parent = hudFrame,
+    })
+    self:BindTheme(targetIcon, "ImageColor3", "Accent")
+
+    local nameLbl = self:Create("TextLabel", {
+        BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(78, 8),
+        Size = UDim2.fromOffset(115, 15),
+        Font = Enum.Font.GothamBold,
+        Text = "s1mple [LOCKED]",
+        TextColor3 = self.Theme.Text,
+        TextSize = 11,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 272,
+        Parent = hudFrame,
+    })
+    self:BindTheme(nameLbl, "TextColor3", "Text")
+
+    local flagBadge = self:Create("TextLabel", {
+        BackgroundTransparency = 1,
+        Position = UDim2.new(1, -48, 0, 8),
+        Size = UDim2.fromOffset(40, 15),
+        Font = Enum.Font.GothamBold,
+        Text = "LC // DT",
+        TextColor3 = self.Theme.Accent,
+        TextSize = 9,
+        TextXAlignment = Enum.TextXAlignment.Right,
+        ZIndex = 272,
+        Parent = hudFrame,
+    })
+    self:BindTheme(flagBadge, "TextColor3", "Accent")
+
+    local subInfoLbl = self:Create("TextLabel", {
+        BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(62, 24),
+        Size = UDim2.new(1, -70, 0, 14),
+        Font = Enum.Font.Code,
+        Text = "92 HP  |  42 FT  |  HC: 84%",
+        TextColor3 = self.Theme.TextDim,
+        TextSize = 11,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 272,
+        Parent = hudFrame,
+    })
+    self:BindTheme(subInfoLbl, "TextColor3", "TextDim")
+
+    -- Health Bar Background + Animated Damage Trail + Fill
+    local hpBg = self:Create("Frame", {
+        BackgroundColor3 = self.Theme.Element,
+        Position = UDim2.fromOffset(62, 43),
+        Size = UDim2.new(1, -70, 0, 11),
+        ZIndex = 271,
+        Parent = hudFrame,
+    })
+    self:BindTheme(hpBg, "BackgroundColor3", "Element")
+    self:ApplyCSBorder(hpBg, "InnerBorder")
+
+    local hpTrail = self:Create("Frame", {
+        BackgroundColor3 = self.Theme.Risky,
+        BorderSizePixel = 0,
+        Size = UDim2.fromScale(0.92, 1),
+        ZIndex = 272,
+        Parent = hpBg,
+    })
+
+    local hpFill = self:Create("Frame", {
+        BackgroundColor3 = Color3.new(1, 1, 1),
+        BorderSizePixel = 0,
+        Size = UDim2.fromScale(0.92, 1),
+        ZIndex = 273,
+        Parent = hpBg,
+    })
+    local hpGrad = self:Create("UIGradient", {
+        Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, self.Theme.Accent),
+            ColorSequenceKeypoint.new(1, self.Theme.AccentDark),
+        }),
+        Parent = hpFill,
+    })
+    table.insert(self.Options, {
+        RefreshTheme = function()
+            if hpGrad and hpGrad.Parent then
+                hpGrad.Color = ColorSequence.new({
+                    ColorSequenceKeypoint.new(0, self.Theme.Accent),
+                    ColorSequenceKeypoint.new(1, self.Theme.AccentDark),
+                })
+            end
+        end
+    })
+
+    local hpValLbl = self:Create("TextLabel", {
+        BackgroundTransparency = 1,
+        Size = UDim2.fromScale(1, 1),
+        Font = Enum.Font.Code,
+        Text = "92 / 100",
+        TextColor3 = self.Theme.Text,
+        TextSize = 10,
+        ZIndex = 274,
+        Parent = hpBg,
+    })
+
+    local hudObj = {
+        Frame = hudFrame,
+        CurrentHP = 92,
+        MaxHP = 100,
+    }
+
+    function hudObj:SetTarget(info)
+        info = info or {}
+        local tName = tostring(info.Name or "s1mple")
+        local hp = math.clamp(tonumber(info.HP or info.Health) or 92, 0, tonumber(info.MaxHP) or 100)
+        local maxHp = math.max(1, tonumber(info.MaxHP) or 100)
+        local dist = tonumber(info.Distance) or 42
+        local hc = tonumber(info.Hitchance) or (tonumber(Library.Flags["Rage_Hitchance"]) or 84)
+        local flags = tostring(info.Flags or (Library.Flags["Rage_DT"] and "LC // DT" or "RESOLVE"))
+        local ratio = math.clamp(hp / maxHp, 0, 1)
+
+        if info.UserId then
+            avatarImg.Image = "rbxthumb://type=AvatarHeadShot&id=" .. tostring(info.UserId) .. "&w=150&h=150"
+        end
+        nameLbl.Text = tName .. " [LOCKED]"
+        flagBadge.Text = flags
+        subInfoLbl.Text = string.format("%d HP  |  %d FT  |  HC: %d%%", hp, dist, hc)
+        hpValLbl.Text = string.format("%d / %d", hp, maxHp)
+        self:Tween(hpFill, TweenFast, { Size = UDim2.fromScale(ratio, 1) })
+        task.delay(0.14, function()
+            if hpTrail and hpTrail.Parent then
+                self:Tween(hpTrail, TweenMedium, { Size = UDim2.fromScale(ratio, 1) })
+            end
+        end)
+        hudObj.CurrentHP = hp
+        hudObj.MaxHP = maxHp
+    end
+
+    function hudObj:SetPlayer(playerName)
+        local plr = playerName and Players:FindFirstChild(tostring(playerName))
+        if plr then
+            local char = plr.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            local hp = hum and math.floor(hum.Health + 0.5) or 100
+            local maxHp = hum and math.floor(hum.MaxHealth + 0.5) or 100
+            local dist = 0
+            pcall(function()
+                if LocalPlayer and LocalPlayer.Character and char then
+                    dist = math.floor((LocalPlayer.Character:GetPivot().Position - char:GetPivot().Position).Magnitude)
+                end
+            end)
+            hudObj:SetTarget({
+                Name = plr.Name,
+                UserId = plr.UserId,
+                HP = hp,
+                MaxHP = maxHp,
+                Distance = dist,
+            })
+        else
+            hudObj:SetTarget({
+                Name = tostring(playerName or "s1mple"),
+                HP = 92,
+                MaxHP = 100,
+                Distance = 42,
+            })
+        end
+    end
+
+    function hudObj:SetVisible(v)
+        hudFrame.Visible = (v == true)
+    end
+
+    self.TargetHUD = hudObj
+    return hudObj
 end
 
 -- ============================================================================
@@ -4409,7 +4985,7 @@ function Library:CreateESPPreview(window, targetTab)
     local glowAura = self:Create("ImageLabel", {
         AnchorPoint = Vector2.new(0.5, 0.5),
         BackgroundTransparency = 1,
-        Position = UDim2.fromScale(0.5, 0.52),
+        Position = UDim2.fromScale(0.5, 0.49),
         Size = UDim2.fromOffset(145, 225),
         Image = "rbxassetid://5028857084",
         ImageColor3 = Color3.fromRGB(225, 55, 110),
@@ -4418,24 +4994,71 @@ function Library:CreateESPPreview(window, targetTab)
         Parent = stage,
     })
 
-    -- 2D Dummy Character Silhouette Parts (Head, Torso, Left/Right Arms, Left/Right Legs)
+    -- 2D Interactive Dummy Character Silhouette (Click body parts to toggle Target Hitboxes)
     local dummyRoot = self:Create("Frame", {
         AnchorPoint = Vector2.new(0.5, 0.5),
         BackgroundTransparency = 1,
-        Position = UDim2.fromScale(0.5, 0.52),
+        Position = UDim2.fromScale(0.5, 0.48),
         Size = UDim2.fromOffset(92, 182),
         ZIndex = 24,
         Parent = stage,
     })
 
     local bodyParts = {}
-    local function MakePart(px, py, pw, ph)
-        local p = self:Create("Frame", {
+    local hitboxHovered = nil
+    local PreviewObj = { Frame = panel }
+
+    local hintLbl = self:Create("TextLabel", {
+        AnchorPoint = Vector2.new(0.5, 1),
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0.5, 0, 1, -3),
+        Size = UDim2.new(1, -8, 0, 12),
+        Font = Enum.Font.Code,
+        Text = "CLICK BODY TO TOGGLE HITBOX",
+        TextColor3 = self.Theme.TextMuted,
+        TextSize = 9,
+        ZIndex = 28,
+        Parent = stage,
+    })
+    self:BindTheme(hintLbl, "TextColor3", "TextMuted")
+
+    local function ToggleHitboxZone(zoneName)
+        local hbOpt = self.Options["Rage_Hitboxes"]
+        local current = self.Flags["Rage_Hitboxes"]
+        local nextMap = {}
+        if type(current) == "table" then
+            for k, v in pairs(current) do
+                if type(k) == "number" then
+                    nextMap[v] = true
+                elseif v then
+                    nextMap[k] = true
+                end
+            end
+        else
+            nextMap["Head"] = true
+            nextMap["Upper Chest"] = true
+            nextMap["Pelvis"] = true
+        end
+        local nextState = not nextMap[zoneName]
+        nextMap[zoneName] = nextState or nil
+        if hbOpt and hbOpt.Set then
+            hbOpt:Set(nextMap)
+        else
+            self.Flags["Rage_Hitboxes"] = nextMap
+            PreviewObj:Refresh()
+        end
+        hintLbl.Text = string.upper(zoneName) .. (nextState and " [ENABLED]" or " [DISABLED]")
+    end
+
+    local function MakePart(px, py, pw, ph, zoneName, shortTag)
+        local p = self:Create("TextButton", {
+            AutoButtonColor = false,
             BackgroundColor3 = Color3.fromRGB(155, 195, 55),
             BackgroundTransparency = 0.2,
             BorderSizePixel = 0,
             Position = UDim2.fromOffset(px, py),
             Size = UDim2.fromOffset(pw, ph),
+            Text = "",
             ZIndex = 24,
             Parent = dummyRoot,
         })
@@ -4444,17 +5067,71 @@ function Library:CreateESPPreview(window, targetTab)
             Thickness = 1,
             Parent = p,
         })
-        table.insert(bodyParts, { Frame = p, Stroke = st })
+        local node = self:Create("Frame", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            BackgroundColor3 = self.Theme.Accent,
+            BorderSizePixel = 0,
+            Position = UDim2.fromScale(0.5, 0.5),
+            Size = UDim2.fromOffset(4, 4),
+            ZIndex = 26,
+            Parent = p,
+        })
+        self:Create("UIStroke", {
+            Color = Color3.new(0, 0, 0),
+            Thickness = 1,
+            Parent = node,
+        })
+        local tagLbl = self:Create("TextLabel", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            BackgroundTransparency = 1,
+            Position = UDim2.fromScale(0.5, 0.5),
+            Size = UDim2.fromScale(1, 1),
+            Font = Enum.Font.GothamBold,
+            Text = shortTag or "",
+            TextColor3 = Color3.fromRGB(245, 245, 250),
+            TextTransparency = 0.25,
+            TextSize = 8,
+            ZIndex = 26,
+            Parent = p,
+        })
+        local partEntry = {
+            Frame = p,
+            Stroke = st,
+            Node = node,
+            Tag = tagLbl,
+            Zone = zoneName,
+        }
+        table.insert(bodyParts, partEntry)
+
+        self:Connect(p.MouseEnter, function()
+            hitboxHovered = zoneName
+            hintLbl.Text = "HITBOX: " .. string.upper(zoneName)
+            PreviewObj:Refresh()
+        end)
+        self:Connect(p.MouseLeave, function()
+            if hitboxHovered == zoneName then
+                hitboxHovered = nil
+            end
+            hintLbl.Text = "CLICK BODY TO TOGGLE HITBOX"
+            PreviewObj:Refresh()
+        end)
+        self:Connect(p.MouseButton1Click, function()
+            ToggleHitboxZone(zoneName)
+        end)
         return p
     end
 
-    -- Head, Neck, Torso, Arms, Legs
-    MakePart(33, 6, 26, 26)   -- Head
-    MakePart(24, 35, 44, 66)  -- Torso
-    MakePart(8, 36, 13, 60)   -- Left Arm
-    MakePart(71, 36, 13, 60)  -- Right Arm
-    MakePart(25, 104, 19, 72) -- Left Leg
-    MakePart(48, 104, 19, 72) -- Right Leg
+    -- Interactive Hitbox Zones: Head, Neck, Upper Chest, Pelvis, Arms, Legs, Feet
+    MakePart(33, 3, 26, 23, "Head", "HD")
+    MakePart(38, 27, 16, 7, "Neck", "")
+    MakePart(24, 35, 44, 37, "Upper Chest", "CH")
+    MakePart(24, 74, 44, 27, "Pelvis", "PL")
+    MakePart(8, 36, 13, 60, "Arms", "LA")
+    MakePart(71, 36, 13, 60, "Arms", "RA")
+    MakePart(25, 103, 19, 57, "Legs", "LL")
+    MakePart(48, 103, 19, 57, "Legs", "RL")
+    MakePart(23, 162, 21, 14, "Feet", "FT")
+    MakePart(48, 162, 21, 14, "Feet", "FT")
 
     -- 2D Bounding Box around Dummy
     local espBox = self:Create("Frame", {
@@ -4588,7 +5265,6 @@ function Library:CreateESPPreview(window, targetTab)
         end
     end
 
-    local PreviewObj = { Frame = panel }
     function PreviewObj:SyncPosition(animate)
         SyncPosition(animate)
     end
@@ -4623,22 +5299,39 @@ function Library:CreateESPPreview(window, targetTab)
         local xqzChams = Library.Flags["Chams_XQZ"]
         local visCol = Library.Flags["Chams_VisCol"] or Library.Theme.Accent
         local xqzCol = Library.Flags["Chams_XQZCol"] or Color3.fromRGB(60, 145, 245)
+        local activeHitboxes = Library.Flags["Rage_Hitboxes"]
         for _, bp in ipairs(bodyParts) do
+            local hbSelected = true
+            if type(activeHitboxes) == "table" then
+                hbSelected = (activeHitboxes[bp.Zone] == true)
+            end
+            local isHover = (hitboxHovered == bp.Zone)
             if visChams then
                 Library:Tween(bp.Frame, TweenFast, {
                     BackgroundColor3 = visCol,
-                    BackgroundTransparency = 0.18,
+                    BackgroundTransparency = hbSelected and 0.14 or 0.58,
                 })
             elseif xqzChams then
                 Library:Tween(bp.Frame, TweenFast, {
                     BackgroundColor3 = xqzCol,
-                    BackgroundTransparency = 0.35,
+                    BackgroundTransparency = hbSelected and 0.28 or 0.65,
                 })
             else
                 Library:Tween(bp.Frame, TweenFast, {
                     BackgroundColor3 = Color3.fromRGB(52, 54, 66),
-                    BackgroundTransparency = 0.25,
+                    BackgroundTransparency = hbSelected and 0.22 or 0.62,
                 })
+            end
+            Library:Tween(bp.Stroke, TweenFast, {
+                Color = isHover and Color3.new(1, 1, 1) or (hbSelected and Library.Theme.Accent or Color3.fromRGB(16, 16, 22)),
+                Thickness = (hbSelected or isHover) and 1 or 1,
+            })
+            if bp.Node then
+                bp.Node.Visible = hbSelected or isHover
+                bp.Node.BackgroundColor3 = isHover and Color3.new(1, 1, 1) or Library.Theme.Accent
+            end
+            if bp.Tag then
+                bp.Tag.Visible = hbSelected or isHover
             end
         end
 
@@ -4757,6 +5450,24 @@ function Library:BuildConfigTab(tab)
         end
     })
 
+    themeGroup:AddToggle({
+        Name = "Show Spectator List",
+        Flag = "UI_ShowSpectators",
+        Default = true,
+        Callback = function(v)
+            if self.SpectatorList then self.SpectatorList:SetVisible(v) end
+        end
+    })
+
+    themeGroup:AddToggle({
+        Name = "Show Target HUD",
+        Flag = "UI_ShowTargetHUD",
+        Default = true,
+        Callback = function(v)
+            if self.TargetHUD then self.TargetHUD:SetVisible(v) end
+        end
+    })
+
     local menuBindLbl = themeGroup:AddLabel("Menu Toggle Key")
     menuBindLbl:AddKeybind({
         Name = "Menu Key",
@@ -4860,9 +5571,33 @@ function Library:BuildConfigTab(tab)
     local cfgGroup = tab:AddRightGroupbox("Configuration", "file-text")
     local cfgName = "legit_default"
     local selectedCfg = "legit_default"
+    local autoloadCfg = "none"
+    local cfgNames = { "legit_default", "rage_hvh", "movement_bhop", "closet_main" }
     local savedMemoryConfigs = {
         ["legit_default"] = self:GetConfigJSON()
     }
+
+    pcall(function()
+        if isfolder and makefolder then
+            if not isfolder(self.Folder) then makefolder(self.Folder) end
+        end
+        if listfiles and isfolder and isfolder(self.Folder) then
+            for _, filePath in ipairs(listfiles(self.Folder)) do
+                local fn = tostring(filePath):match("([^/\\]+)%.json$")
+                if fn and not table.find(cfgNames, fn) then
+                    table.insert(cfgNames, fn)
+                end
+            end
+        end
+        if isfile and readfile and isfile(self.Folder .. "/autoload.txt") then
+            local rawAuto = readfile(self.Folder .. "/autoload.txt"):gsub("%s+", "")
+            if rawAuto ~= "" then
+                autoloadCfg = rawAuto
+            end
+        end
+    end)
+
+    local autoStatusLbl = cfgGroup:AddLabel("Autoload Profile: " .. autoloadCfg)
 
     cfgGroup:AddInput({
         Name = "Config Name",
@@ -4878,7 +5613,7 @@ function Library:BuildConfigTab(tab)
         Name = "Saved Configs",
         Flag = "UI_ConfigList",
         Height = 95,
-        Values = { "legit_default", "rage_hvh", "movement_bhop", "closet_main" },
+        Values = cfgNames,
         Default = "legit_default",
         Callback = function(val)
             selectedCfg = val
@@ -4924,8 +5659,69 @@ function Library:BuildConfigTab(tab)
         end
     })
 
-    cfgGroup:AddButton({
-        Name = "Export Config to Clipboard",
+    local autoBtn = cfgGroup:AddButton({
+        Name = "Set Autoload",
+        Icon = "shield-check",
+        Callback = function()
+            local target = selectedCfg or cfgName or "legit_default"
+            autoloadCfg = target
+            autoStatusLbl:SetText("Autoload Profile: " .. autoloadCfg)
+            pcall(function()
+                if isfolder and makefolder and writefile then
+                    if not isfolder(self.Folder) then makefolder(self.Folder) end
+                    writefile(self.Folder .. "/autoload.txt", target)
+                    if not isfile or not isfile(self.Folder .. "/" .. target .. ".json") then
+                        writefile(self.Folder .. "/" .. target .. ".json", self:GetConfigJSON())
+                    end
+                end
+            end)
+            self:Notify({ Title = "Autoload Set", Description = "Profile '" .. target .. "' will auto-load on launch.", Icon = "shield-check" })
+        end
+    })
+
+    autoBtn:AddButton({
+        Name = "Clear Autoload",
+        Icon = "x",
+        Callback = function()
+            autoloadCfg = "none"
+            autoStatusLbl:SetText("Autoload Profile: none")
+            pcall(function()
+                if delfile and isfile and isfile(self.Folder .. "/autoload.txt") then
+                    delfile(self.Folder .. "/autoload.txt")
+                elseif writefile then
+                    writefile(self.Folder .. "/autoload.txt", "")
+                end
+            end)
+            self:Notify({ Title = "Autoload Cleared", Description = "Disabled automatic config loading.", Icon = "info" })
+        end
+    })
+
+    local deleteBtn = cfgGroup:AddButton({
+        Name = "Delete Config",
+        Icon = "trash",
+        Risky = true,
+        Confirm = true,
+        Callback = function()
+            local target = selectedCfg
+            if not target then return end
+            savedMemoryConfigs[target] = nil
+            pcall(function()
+                if delfile and isfile and isfile(self.Folder .. "/" .. target .. ".json") then
+                    delfile(self.Folder .. "/" .. target .. ".json")
+                end
+            end)
+            local idx = table.find(cfgList.Values, target)
+            if idx and #cfgList.Values > 1 then
+                table.remove(cfgList.Values, idx)
+                selectedCfg = cfgList.Values[1]
+                cfgList:Refresh(cfgList.Values)
+            end
+            self:Notify({ Title = "Config Deleted", Description = "Removed profile '" .. tostring(target) .. "'.", Icon = "trash", Color = self.Theme.Risky })
+        end
+    })
+
+    deleteBtn:AddButton({
+        Name = "Export JSON",
         Icon = "clipboard",
         Callback = function()
             local json = self:GetConfigJSON()
@@ -4935,6 +5731,21 @@ function Library:BuildConfigTab(tab)
             self:Notify({ Title = "Clipboard", Description = "Exported JSON config string.", Icon = "clipboard" })
         end
     })
+
+    -- Automatically execute autoload profile if present on disk
+    if autoloadCfg ~= "none" then
+        task.defer(function()
+            local raw = savedMemoryConfigs[autoloadCfg]
+            pcall(function()
+                if isfile and readfile and isfile(self.Folder .. "/" .. autoloadCfg .. ".json") then
+                    raw = readfile(self.Folder .. "/" .. autoloadCfg .. ".json")
+                end
+            end)
+            if raw then
+                self:LoadConfigJSON(raw)
+            end
+        end)
+    end
 end
 
 function Library:Unload()
