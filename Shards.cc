@@ -2169,6 +2169,13 @@ function Library:CreateIndicators()
                     Color = Library.Theme.Text,
                 })
             end
+            if F["Rage_NoSpread"] then
+                table.insert(activeList, {
+                    Id = "NOSPREAD",
+                    Text = "NOSPREAD",
+                    Color = Library.Theme.Success,
+                })
+            end
             if F["FL_Enable"] then
                 local choke = tonumber(F["FL_Limit"]) or 14
                 table.insert(activeList, {
@@ -2877,13 +2884,204 @@ function Library:CreateWorldController()
     local currentSilentPart = nil
     local currentSilentPos = nil
     local currentSilentPlr = nil
+    local currentRagePart = nil
+    local currentRagePos = nil
+    local currentRagePlr = nil
     local isInternalRaycast = false
     local hasSilentHook = false
     local localMouse = LocalPlayer and LocalPlayer:GetMouse() or nil
     local vimService = nil
     pcall(function() vimService = game:GetService("VirtualInputManager") end)
 
-    -- Hook workspace raycasts, Camera rays & Mouse.Hit/Target for true camera-free Silent Aim in Counter Blox
+    -- Weapon Recoil & Spread Patching State (Counter Blox ReplicatedStorage.Weapons + Client senv + Universal Tools)
+    local savedRecoilVals = {}
+    local savedSpreadVals = {}
+    local savedRecoilAttrs = {}
+    local savedSpreadAttrs = {}
+    local savedGcRecoil = {}
+    local savedGcSpread = {}
+    local lastWeaponModScan = 0
+    local lastNoRecoilState = false
+    local lastNoSpreadState = false
+
+    local RecoilKeyLookup = {
+        recoil = true, recoilcontrol = true, recoilmin = true, recoilmax = true,
+        vrecoil = true, hrecoil = true, kick = true, camkick = true, camshake = true,
+        shake = true, anglex = true, angley = true, anglez = true, recoilpunch = true,
+        aimkick = true, viewkick = true, gunrecoil = true,
+    }
+    local SpreadKeyLookup = {
+        spread = true, minspread = true, maxspread = true, hipspread = true,
+        aimspread = true, movespread = true, jumpspread = true, inaccuracy = true,
+        bloom = true, spreadangle = true, crouch = true, jump = true, land = true,
+        ladder = true, move = true, stand = true, recoverytime = true,
+    }
+
+    local function RestoreRecoilMods()
+        for obj, orig in pairs(savedRecoilVals) do
+            if obj and obj.Parent then
+                pcall(function() obj.Value = orig end)
+            end
+        end
+        table.clear(savedRecoilVals)
+        for entry, orig in pairs(savedRecoilAttrs) do
+            if entry.Inst and entry.Inst.Parent then
+                pcall(function() entry.Inst:SetAttribute(entry.Attr, orig) end)
+            end
+        end
+        table.clear(savedRecoilAttrs)
+        for tbl, fields in pairs(savedGcRecoil) do
+            if type(tbl) == "table" then
+                for k, orig in pairs(fields) do
+                    pcall(rawset, tbl, k, orig)
+                end
+            end
+        end
+        table.clear(savedGcRecoil)
+    end
+
+    local function RestoreSpreadMods()
+        for obj, orig in pairs(savedSpreadVals) do
+            if obj and obj.Parent then
+                pcall(function() obj.Value = orig end)
+            end
+        end
+        table.clear(savedSpreadVals)
+        for entry, orig in pairs(savedSpreadAttrs) do
+            if entry.Inst and entry.Inst.Parent then
+                pcall(function() entry.Inst:SetAttribute(entry.Attr, orig) end)
+            end
+        end
+        table.clear(savedSpreadAttrs)
+        for tbl, fields in pairs(savedGcSpread) do
+            if type(tbl) == "table" then
+                for k, orig in pairs(fields) do
+                    pcall(rawset, tbl, k, orig)
+                end
+            end
+        end
+        table.clear(savedGcSpread)
+    end
+
+    local function PatchContainerDescendants(root, wantNoRecoil, wantNoSpread)
+        if not root then return end
+        for _, obj in ipairs(root:GetDescendants()) do
+            if obj:IsA("NumberValue") or obj:IsA("IntValue") or obj:IsA("Vector3Value") then
+                local lName = string.lower(obj.Name)
+                local pName = obj.Parent and string.lower(obj.Parent.Name) or ""
+                local isVec = obj:IsA("Vector3Value")
+                local zeroVal = isVec and Vector3.zero or 0
+
+                if wantNoRecoil and (pName == "recoil" or RecoilKeyLookup[lName]) then
+                    if savedRecoilVals[obj] == nil then
+                        savedRecoilVals[obj] = obj.Value
+                    end
+                    pcall(function() obj.Value = zeroVal end)
+                end
+
+                if wantNoSpread and (pName == "spread" or (SpreadKeyLookup[lName] and (pName == "spread" or not (lName == "crouch" or lName == "jump" or lName == "land" or lName == "ladder" or lName == "move" or lName == "stand")))) then
+                    if savedSpreadVals[obj] == nil then
+                        savedSpreadVals[obj] = obj.Value
+                    end
+                    pcall(function() obj.Value = zeroVal end)
+                end
+            end
+
+            if obj:IsA("Tool") or obj:IsA("Configuration") or obj:IsA("Folder") then
+                local okAttr, attrs = pcall(function() return obj:GetAttributes() end)
+                if okAttr and type(attrs) == "table" then
+                    for attrName, attrVal in pairs(attrs) do
+                        if type(attrVal) == "number" or typeof(attrVal) == "Vector3" then
+                            local lAttr = string.lower(attrName)
+                            local zeroAttr = typeof(attrVal) == "Vector3" and Vector3.zero or 0
+                            if wantNoRecoil and (RecoilKeyLookup[lAttr] or string.find(lAttr, "recoil") or string.find(lAttr, "kick")) then
+                                local found = false
+                                for entry in pairs(savedRecoilAttrs) do
+                                    if entry.Inst == obj and entry.Attr == attrName then found = true; break end
+                                end
+                                if not found then
+                                    savedRecoilAttrs[{ Inst = obj, Attr = attrName }] = attrVal
+                                end
+                                pcall(function() obj:SetAttribute(attrName, zeroAttr) end)
+                            end
+                            if wantNoSpread and (SpreadKeyLookup[lAttr] or string.find(lAttr, "spread") or string.find(lAttr, "inaccuracy") or string.find(lAttr, "bloom")) then
+                                local found = false
+                                for entry in pairs(savedSpreadAttrs) do
+                                    if entry.Inst == obj and entry.Attr == attrName then found = true; break end
+                                end
+                                if not found then
+                                    savedSpreadAttrs[{ Inst = obj, Attr = attrName }] = attrVal
+                                end
+                                pcall(function() obj:SetAttribute(attrName, zeroAttr) end)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    local function SyncWeaponMods(wantNoRecoil, wantNoSpread)
+        if not wantNoRecoil and lastNoRecoilState then
+            RestoreRecoilMods()
+        end
+        if not wantNoSpread and lastNoSpreadState then
+            RestoreSpreadMods()
+        end
+
+        local stateChanged = (wantNoRecoil ~= lastNoRecoilState) or (wantNoSpread ~= lastNoSpreadState)
+        lastNoRecoilState = wantNoRecoil
+        lastNoSpreadState = wantNoSpread
+
+        if not wantNoRecoil and not wantNoSpread then
+            return
+        end
+
+        -- Counter Blox Client LocalScript environment (zero live recoil & currentspread every frame)
+        if LocalPlayer and getsenv then
+            pcall(function()
+                local pGui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+                local clientScr = pGui and (pGui:FindFirstChild("Client") or pGui:FindFirstChild("MainClient"))
+                if clientScr then
+                    local senv = getsenv(clientScr)
+                    if type(senv) == "table" then
+                        if wantNoSpread then
+                            if senv.currentspread ~= nil then senv.currentspread = 0 end
+                            if senv.spread ~= nil and type(senv.spread) == "number" then senv.spread = 0 end
+                            if senv.Spread ~= nil and type(senv.Spread) == "number" then senv.Spread = 0 end
+                        end
+                        if wantNoRecoil then
+                            if senv.recoil ~= nil and type(senv.recoil) == "number" then senv.recoil = 0 end
+                            if senv.Recoil ~= nil and type(senv.Recoil) == "number" then senv.Recoil = 0 end
+                            if senv.shake ~= nil and type(senv.shake) == "number" then senv.shake = 0 end
+                        end
+                    end
+                end
+            end)
+        end
+
+        local now = os.clock()
+        if not stateChanged and (now - lastWeaponModScan) < 0.45 then
+            return
+        end
+        lastWeaponModScan = now
+
+        local repWeapons = game:GetService("ReplicatedStorage"):FindFirstChild("Weapons")
+        if repWeapons then
+            PatchContainerDescendants(repWeapons, wantNoRecoil, wantNoSpread)
+        end
+        if LocalPlayer then
+            if LocalPlayer.Character then
+                PatchContainerDescendants(LocalPlayer.Character, wantNoRecoil, wantNoSpread)
+            end
+            local bp = LocalPlayer:FindFirstChildOfClass("Backpack")
+            if bp then
+                PatchContainerDescendants(bp, wantNoRecoil, wantNoSpread)
+            end
+        end
+    end
+
+    -- Hook workspace raycasts, Camera rays & Mouse.Hit/Target for Silent Aim & No Spread in Counter Blox / Universal FPS
     pcall(function()
         if hookmetamethod and getnamecallmethod then
             local wrapClosure = newcclosure or function(fn) return fn end
@@ -2891,8 +3089,17 @@ function Library:CreateWorldController()
             oldNamecall = hookmetamethod(game, "__namecall", wrapClosure(function(selfObj, ...)
                 if not isInternalRaycast and not Library.Unloaded then
                     local F = Library.Flags
-                    local targetPos = currentSilentPos or (currentSilentPart and currentSilentPart.Parent and currentSilentPart.Position)
-                    if F["Rage_Enabled"] == true and F["Rage_Silent"] == true and targetPos then
+                    local silentTargetPos = (F["Rage_Enabled"] == true and F["Rage_Silent"] == true)
+                        and (currentSilentPos or (currentSilentPart and currentSilentPart.Parent and currentSilentPart.Position))
+                        or nil
+                    local noSpreadActive = (F["Rage_NoSpread"] == true)
+                    local rageTargetPos = (F["Rage_Enabled"] == true and noSpreadActive)
+                        and (currentRagePos or (currentRagePart and currentRagePart.Parent and currentRagePart.Position))
+                        or nil
+                    local targetPos = silentTargetPos or rageTargetPos
+                    local targetPlr = silentTargetPos and currentSilentPlr or (rageTargetPos and currentRagePlr or nil)
+
+                    if targetPos or noSpreadActive then
                         local method = getnamecallmethod()
                         if selfObj == workspace then
                             if method == "FindPartOnRayWithIgnoreList"
@@ -2905,13 +3112,23 @@ function Library:CreateWorldController()
                                     -- Only redirect weapon bullet rays (length >= 35), ignoring short footstep/camera popper rays
                                     if origRay.Direction.Magnitude >= 35 then
                                         local origin = origRay.Origin
-                                        local vec = targetPos - origin
-                                        if vec.Magnitude > 0.05 then
-                                            local len = math.max(origRay.Direction.Magnitude, vec.Magnitude + 50, 999)
-                                            args[1] = Ray.new(origin, vec.Unit * len)
-                                            lastLocalShotTime = os.clock()
-                                            lastLocalShotTarget = currentSilentPlr
-                                            return oldNamecall(selfObj, unpack(args))
+                                        if targetPos then
+                                            local vec = targetPos - origin
+                                            if vec.Magnitude > 0.05 then
+                                                local len = math.max(origRay.Direction.Magnitude, vec.Magnitude + 50, 999)
+                                                args[1] = Ray.new(origin, vec.Unit * len)
+                                                lastLocalShotTime = os.clock()
+                                                lastLocalShotTarget = targetPlr
+                                                return oldNamecall(selfObj, unpack(args))
+                                            end
+                                        elseif noSpreadActive then
+                                            local cam = workspace.CurrentCamera
+                                            if cam and (origin - cam.CFrame.Position).Magnitude < 18 then
+                                                local len = origRay.Direction.Magnitude
+                                                args[1] = Ray.new(origin, cam.CFrame.LookVector * len)
+                                                lastLocalShotTime = os.clock()
+                                                return oldNamecall(selfObj, unpack(args))
+                                            end
                                         end
                                     end
                                 end
@@ -2919,21 +3136,33 @@ function Library:CreateWorldController()
                                 local args = { ... }
                                 if typeof(args[1]) == "Vector3" and typeof(args[2]) == "Vector3" and args[2].Magnitude >= 35 then
                                     local origin = args[1]
-                                    local vec = targetPos - origin
-                                    if vec.Magnitude > 0.05 then
-                                        local len = math.max(args[2].Magnitude, vec.Magnitude + 50, 999)
-                                        args[2] = vec.Unit * len
-                                        lastLocalShotTime = os.clock()
-                                        lastLocalShotTarget = currentSilentPlr
-                                        return oldNamecall(selfObj, unpack(args))
+                                    if targetPos then
+                                        local vec = targetPos - origin
+                                        if vec.Magnitude > 0.05 then
+                                            local len = math.max(args[2].Magnitude, vec.Magnitude + 50, 999)
+                                            args[2] = vec.Unit * len
+                                            lastLocalShotTime = os.clock()
+                                            lastLocalShotTarget = targetPlr
+                                            return oldNamecall(selfObj, unpack(args))
+                                        end
+                                    elseif noSpreadActive then
+                                        local cam = workspace.CurrentCamera
+                                        if cam and (origin - cam.CFrame.Position).Magnitude < 18 then
+                                            local len = args[2].Magnitude
+                                            args[2] = cam.CFrame.LookVector * len
+                                            lastLocalShotTime = os.clock()
+                                            return oldNamecall(selfObj, unpack(args))
+                                        end
                                     end
                                 end
                             end
                         elseif selfObj == workspace.CurrentCamera and (method == "ViewportPointToRay" or method == "ScreenPointToRay") then
-                            local camPos = selfObj.CFrame.Position
-                            local vec = targetPos - camPos
-                            if vec.Magnitude > 0.05 then
-                                return Ray.new(camPos, vec.Unit)
+                            if targetPos then
+                                local camPos = selfObj.CFrame.Position
+                                local vec = targetPos - camPos
+                                if vec.Magnitude > 0.05 then
+                                    return Ray.new(camPos, vec.Unit)
+                                end
                             end
                         end
                     end
@@ -2945,12 +3174,15 @@ function Library:CreateWorldController()
             oldIndex = hookmetamethod(game, "__index", wrapClosure(function(selfObj, key)
                 if not isInternalRaycast and not Library.Unloaded and localMouse and selfObj == localMouse then
                     local F = Library.Flags
-                    if F["Rage_Enabled"] == true and F["Rage_Silent"] == true and currentSilentPart and currentSilentPart.Parent then
-                        local targetPos = currentSilentPos or currentSilentPart.Position
+                    local activePart = (F["Rage_Enabled"] == true and (F["Rage_Silent"] == true or F["Rage_NoSpread"] == true))
+                        and (currentSilentPart or currentRagePart)
+                        or nil
+                    if activePart and activePart.Parent then
+                        local targetPos = currentSilentPos or currentRagePos or activePart.Position
                         if key == "Hit" then
                             return CFrame.new(targetPos)
                         elseif key == "Target" then
-                            return currentSilentPart
+                            return activePart
                         elseif key == "UnitRay" then
                             local cam = workspace.CurrentCamera
                             local orig = cam and cam.CFrame.Position or Vector3.zero
@@ -4357,6 +4589,15 @@ function Library:CreateWorldController()
                 cam.FieldOfView = origCamFov
             end
 
+            -- 1.5) Weapon No Recoil & No Spread Patching + Camera Shake / Kick Stabilization
+            local removals = type(F["World_Removals"]) == "table" and F["World_Removals"] or nil
+            local wantNoRecoil = (F["Rage_NoRecoil"] == true) or (removals and removals["Visual Recoil"] == true) or false
+            local wantNoSpread = (F["Rage_NoSpread"] == true)
+            SyncWeaponMods(wantNoRecoil, wantNoSpread)
+            if wantNoRecoil and myHum and myHum.CameraOffset.Magnitude > 0.001 then
+                myHum.CameraOffset = Vector3.zero
+            end
+
             -- 2) Combat Target Acquisition, Aimbot (Rage / Legit), AutoFire & Triggerbot
             local kbRage = self.Options["Rage_Key"]
             local kbLegit = self.Options["Legit_Key"]
@@ -4569,10 +4810,13 @@ function Library:CreateWorldController()
                 currentSilentPart = (rageActive and F["Rage_Silent"] == true) and bestAimPart or nil
                 currentSilentPos = (rageActive and F["Rage_Silent"] == true) and bestAimPoint or nil
                 currentSilentPlr = (rageActive and F["Rage_Silent"] == true) and bestPlr or nil
+                currentRagePart = rageActive and bestAimPart or nil
+                currentRagePos = rageActive and bestAimPoint or nil
+                currentRagePlr = rageActive and bestPlr or nil
 
                 if bestAimPart and bestAimPoint then
                     local aimPos = bestAimPoint
-                    if not rageActive and F["Legit_RCS"] then
+                    if not rageActive and F["Legit_RCS"] and not wantNoRecoil then
                         aimPos = aimPos - Vector3.new(0, 0.18, 0)
                     end
                     local targetCF = CFrame.lookAt(cam.CFrame.Position, aimPos)
@@ -4589,14 +4833,14 @@ function Library:CreateWorldController()
                         end
 
                         -- Calculate live Hitchance (0..100) from velocity, airborne state, distance & recoil recovery
-                        local distPenalty = math.clamp((bestDist3d - 35) * 0.14, 0, 22)
-                        local movePenalty = grounded and math.clamp(mySpd * 1.65, 0, 38) or 35
-                        local liveHc = math.clamp(100 - distPenalty - movePenalty, 15, 100)
+                        local distPenalty = wantNoSpread and 0 or math.clamp((bestDist3d - 35) * 0.14, 0, 22)
+                        local movePenalty = wantNoSpread and 0 or (grounded and math.clamp(mySpd * 1.65, 0, 38) or 35)
+                        local liveHc = wantNoSpread and 100 or math.clamp(100 - distPenalty - movePenalty, 15, 100)
                         local reqHc = tonumber(F["Rage_Hitchance"]) or 68
 
                         -- Only rotate camera if Silent Aim is off (or if executor lacks hookmetamethod)
                         if F["Rage_Silent"] ~= true or not hasSilentHook then
-                            cam.CFrame = (F["Rage_Silent"] == true) and targetCF or cam.CFrame:Lerp(targetCF, 0.92)
+                            cam.CFrame = (F["Rage_Silent"] == true or wantNoRecoil) and targetCF or cam.CFrame:Lerp(targetCF, 0.92)
                         end
                         local fireCooldown = (F["Rage_DT"] == true) and 0.05 or 0.12
                         if F["Rage_AutoFire"] and liveHc >= reqHc and (os.clock() - lastRageFire) >= fireCooldown then
@@ -4614,6 +4858,9 @@ function Library:CreateWorldController()
                 currentSilentPart = nil
                 currentSilentPos = nil
                 currentSilentPlr = nil
+                currentRagePart = nil
+                currentRagePos = nil
+                currentRagePlr = nil
             end
 
             if trigActive then
@@ -4673,7 +4920,7 @@ function Library:CreateWorldController()
                         trigAcquireTime = now
                     end
                     local isAccurate = true
-                    if F["Trig_AccurateOnly"] == true then
+                    if F["Trig_AccurateOnly"] == true and not wantNoSpread then
                         local grounded = (not myHum) or (myHum.FloorMaterial ~= Enum.Material.Air)
                         local horizSpd = 0
                         if myHrp then
@@ -4741,6 +4988,8 @@ function Library:CreateWorldController()
         end,
         Cleanup = function()
             pcall(function() RunService:UnbindFromRenderStep("ShardsAspectStretch") end)
+            RestoreRecoilMods()
+            RestoreSpreadMods()
             for plr in pairs(playerConns) do
                 DisconnectPlayerConns(plr)
             end
@@ -9162,6 +9411,7 @@ function Library:BuildConfigTab(tab)
         ["legit_default"] = self:GetConfigJSON(),
         ["rage_hvh"] = self:GetConfigJSON({
             Rage_Enabled = true, Rage_Silent = true, Rage_AutoFire = true, Rage_Autowall = true,
+            Rage_NoRecoil = true, Rage_NoSpread = true,
             Rage_Hitchance = 78, Rage_MinDmg = 55, Rage_DT = true, AA_Enabled = true, FL_Enable = true,
             ESP_Box = true, ESP_Name = true, ESP_Health = true, Chams_Vis = true, Chams_XQZ = true,
             UI_ShowWatermark = true, UI_ShowKeybinds = true, UI_ShowIndicators = true, Misc_ShowIndicators = true,
