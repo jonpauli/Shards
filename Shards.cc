@@ -30,10 +30,22 @@ local Library = {
     Options = {},
     Connections = {},
     ThemeObjects = {},
+    TextObjects = {},
+    LayoutRefreshers = {},
     ActiveKeybinds = {},
     Notifications = {},
     OpenPopups = {},
     Folder = "ShardsUI",
+    Font = Enum.Font.Arcade,
+    FontBold = Enum.Font.Arcade,
+    FontScale = 0.85,
+    TextStroke = true,
+    Fonts = {
+        ["Pixelated (CS Bitmap)"] = { Font = Enum.Font.Arcade,     Bold = Enum.Font.Arcade,     Scale = 0.85 },
+        ["CS2 Crisp (RobotoMono)"] = { Font = Enum.Font.RobotoMono, Bold = Enum.Font.RobotoMono, Scale = 1.00 },
+        ["Skeet Mono (Code)"]      = { Font = Enum.Font.Code,       Bold = Enum.Font.GothamBold, Scale = 1.00 },
+        ["Classic (Tahoma)"]       = { Font = Enum.Font.Legacy,     Bold = Enum.Font.Legacy,     Scale = 0.92 },
+    },
     Theme = {
         Background       = Color3.fromRGB(11, 11, 14),
         Sidebar          = Color3.fromRGB(14, 14, 18),
@@ -174,13 +186,61 @@ end
 
 function Library:Create(className, props, children)
     local inst = Instance.new(className)
+    local isText = inst:IsA("TextLabel") or inst:IsA("TextButton") or inst:IsA("TextBox")
+    local rawSize = props and props.TextSize or 12
+    local rawFont = props and props.Font
+
     for k, v in pairs(props or {}) do
         inst[k] = v
     end
+
+    if isText then
+        local isBold = (rawFont == Enum.Font.GothamBold)
+        inst.Font = isBold and self.FontBold or self.Font
+        inst.TextSize = math.max(8, math.floor(rawSize * self.FontScale + 0.5))
+        if self.TextStroke and (not props or props.TextStrokeTransparency == nil) then
+            inst.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+            inst.TextStrokeTransparency = 0.18
+        end
+        table.insert(self.TextObjects, {
+            Instance = inst,
+            BaseSize = rawSize,
+            IsBold = isBold,
+        })
+    end
+
     for _, child in ipairs(children or {}) do
         child.Parent = inst
     end
     return inst
+end
+
+function Library:GetTextBounds(text, baseSize, maxVec)
+    local scaledSize = math.max(8, math.floor((baseSize or 12) * self.FontScale + 0.5))
+    local ok, res = pcall(function()
+        return TextService:GetTextSize(tostring(text or ""), scaledSize, self.Font, maxVec or Vector2.new(500, 200))
+    end)
+    return ok and res or Vector2.new(#tostring(text or "") * 7, scaledSize + 2)
+end
+
+function Library:SetFontPreset(presetName)
+    local preset = self.Fonts[presetName]
+    if not preset then return end
+    self.Font = preset.Font
+    self.FontBold = preset.Bold
+    self.FontScale = preset.Scale
+    for i = #self.TextObjects, 1, -1 do
+        local entry = self.TextObjects[i]
+        if entry.Instance and entry.Instance.Parent then
+            entry.Instance.Font = entry.IsBold and self.FontBold or self.Font
+            entry.Instance.TextSize = math.max(8, math.floor(entry.BaseSize * self.FontScale + 0.5))
+        else
+            table.remove(self.TextObjects, i)
+        end
+    end
+    for _, fn in ipairs(self.LayoutRefreshers) do
+        pcall(fn)
+    end
 end
 
 function Library:BindTheme(instance, property, themeKey)
@@ -243,11 +303,13 @@ function Library:ApplyCSBorder(frame, highlightKey)
     local outerWrap = self:Create("Frame", {
         Name = "OuterBorder",
         BackgroundTransparency = 1,
+        Active = false,
         Position = UDim2.new(0, -1, 0, -1),
         Size = UDim2.new(1, 2, 1, 2),
         ZIndex = math.max(1, frame.ZIndex - 1),
         Parent = frame,
     })
+    pcall(function() outerWrap.Interactable = false end)
     local blackStroke = self:Create("UIStroke", {
         Color = self.Theme.OuterBorder,
         Thickness = 1,
@@ -299,6 +361,7 @@ function Library:MakeDraggable(dragHandle, targetFrame)
             dragging = true
             dragStart = input.Position
             startPos = targetFrame.Position
+            self:ClosePopups()
         end
     end)
 
@@ -415,9 +478,9 @@ Library:BindTheme(TooltipLabel, "TextColor3", "Text")
 function Library:AddTooltip(target, text)
     if not text or text == "" then return end
     self:Connect(target.MouseEnter, function()
-        local bounds = TextService:GetTextSize(text, 12, Enum.Font.Code, Vector2.new(500, 100))
+        local bounds = self:GetTextBounds(text, 12, Vector2.new(500, 100))
         TooltipLabel.Text = text
-        TooltipFrame.Size = UDim2.fromOffset(bounds.X + 16, 22)
+        TooltipFrame.Size = UDim2.fromOffset(bounds.X + 18, 22)
         TooltipFrame.Visible = true
     end)
     self:Connect(target.MouseLeave, function()
@@ -456,7 +519,7 @@ function Library:Notify(cfg)
     local iconName = cfg.Icon or "bell"
     local barColor = cfg.Color or self.Theme.Accent
 
-    local textBounds = TextService:GetTextSize(desc, 12, Enum.Font.Code, Vector2.new(240, 200))
+    local textBounds = self:GetTextBounds(desc, 12, Vector2.new(240, 200))
     local height = math.max(46, textBounds.Y + 28)
 
     local wrap = self:Create("Frame", {
@@ -554,8 +617,9 @@ end
 function Library:CreateWatermark(customTitle)
     local wmFrame = self:Create("Frame", {
         Name = "Watermark",
+        AnchorPoint = Vector2.new(1, 0),
         BackgroundColor3 = self.Theme.Background,
-        Position = UDim2.new(1, -295, 0, 12),
+        Position = UDim2.new(1, -14, 0, 12),
         Size = UDim2.fromOffset(280, 24),
         ZIndex = 300,
         Parent = ScreenGui,
@@ -616,8 +680,8 @@ function Library:CreateWatermark(customTitle)
                 os.date("%H:%M:%S")
             )
             wmText.Text = str
-            local bounds = TextService:GetTextSize(str, 12, Enum.Font.Code, Vector2.new(600, 24))
-            wmFrame.Size = UDim2.fromOffset(bounds.X + 34, 24)
+            local bounds = self:GetTextBounds(str, 12, Vector2.new(700, 24))
+            wmFrame.Size = UDim2.fromOffset(bounds.X + 38, 24)
         end
     end)
 
@@ -700,9 +764,14 @@ function Library:CreateKeybindList()
             if ch:IsA("Frame") then ch:Destroy() end
         end
         local count = 0
+        local maxW = 185
         for _, item in pairs(Library.ActiveKeybinds) do
             if item.Active and item.Key and item.Key ~= Enum.KeyCode.Unknown then
                 count += 1
+                local modeStr = "[" .. string.lower(item.Mode or "toggle") .. "]"
+                local nameW = Library:GetTextBounds(item.Name, 12, Vector2.new(300, 20)).X
+                local modeW = Library:GetTextBounds(modeStr, 11, Vector2.new(150, 20)).X
+                maxW = math.max(maxW, nameW + modeW + 28)
                 local row = Library:Create("Frame", {
                     BackgroundTransparency = 1,
                     Size = UDim2.new(1, 0, 0, 16),
@@ -725,7 +794,7 @@ function Library:CreateKeybindList()
                     Position = UDim2.fromScale(0.68, 0),
                     Size = UDim2.new(0.32, 0, 1, 0),
                     Font = Enum.Font.Code,
-                    Text = "[" .. string.lower(item.Mode or "toggle") .. "]",
+                    Text = modeStr,
                     TextColor3 = Library.Theme.Accent,
                     TextSize = 11,
                     TextXAlignment = Enum.TextXAlignment.Right,
@@ -735,7 +804,7 @@ function Library:CreateKeybindList()
             end
         end
         local targetH = 30 + (count > 0 and (count * 19 + 4) or 0)
-        Library:Tween(kbFrame, TweenFast, { Size = UDim2.fromOffset(185, targetH) })
+        Library:Tween(kbFrame, TweenFast, { Size = UDim2.fromOffset(maxW, targetH) })
     end
 
     function kbObj:SetVisible(v)
@@ -784,10 +853,11 @@ function Library:CreateKeybindAttachment(parentRow, cfg, toggleLink)
     local function UpdateButtonSize()
         local txt = binding and "[...]" or ("[" .. self:FormatKey(currentKey) .. "]")
         btn.Text = txt
-        local b = TextService:GetTextSize(txt, 11, Enum.Font.Code, Vector2.new(200, 20))
+        local b = self:GetTextBounds(txt, 11, Vector2.new(200, 20))
         btn.Size = UDim2.fromOffset(math.max(36, b.X + 10), 15)
     end
     UpdateButtonSize()
+    table.insert(self.LayoutRefreshers, UpdateButtonSize)
 
     -- Mode Popup (Hold / Toggle / Always)
     local modePopup = self:Create("Frame", {
@@ -2438,7 +2508,7 @@ function GroupboxMethods:AddDivider(textOrCfg, iconName)
     end
 
     local str = string.upper(tostring(text))
-    local bounds = TextService:GetTextSize(str, 10, Enum.Font.GothamBold, Vector2.new(300, 20))
+    local bounds = Library:GetTextBounds(str, 10, Vector2.new(300, 20))
     local centerWidth = bounds.X + (icon and 24 or 12)
 
     local leftLine = Library:Create("Frame", {
@@ -2503,6 +2573,14 @@ function GroupboxMethods:AddDivider(textOrCfg, iconName)
         Parent = row,
     })
     Library:BindTheme(rightLine, "BackgroundColor3", "InnerBorder")
+    table.insert(Library.LayoutRefreshers, function()
+        if not row or not row.Parent then return end
+        local nb = Library:GetTextBounds(str, 10, Vector2.new(300, 20))
+        local cw = nb.X + (icon and 24 or 12)
+        center.Size = UDim2.fromOffset(cw, 16)
+        leftLine.Size = UDim2.new(0.5, -math.floor(cw / 2) - 4, 0, 1)
+        rightLine.Size = UDim2.new(0.5, -math.floor(cw / 2) - 4, 0, 1)
+    end)
     return row
 end
 
@@ -2512,7 +2590,7 @@ function GroupboxMethods:AddLabel(textOrCfg, wrapText)
     local text = isTable and (textOrCfg.Text or textOrCfg.Name) or tostring(textOrCfg or "")
     local wrapped = isTable and textOrCfg.Wrap or wrapText or false
 
-    local bounds = TextService:GetTextSize(text, 12, Enum.Font.Code, Vector2.new(220, 400))
+    local bounds = Library:GetTextBounds(text, 12, Vector2.new(220, 400))
     local rowH = wrapped and math.max(18, bounds.Y + 4) or 18
 
     local row = Library:Create("Frame", {
@@ -2611,7 +2689,7 @@ local function CreateGroupboxContainer(parentColumn, title, iconName)
 
     -- Classic CS:GO Overlapping Title Pill on the Top Border
     local strTitle = string.upper(tostring(title or "GROUP"))
-    local tBounds = TextService:GetTextSize(strTitle, 11, Enum.Font.GothamBold, Vector2.new(250, 20))
+    local tBounds = Library:GetTextBounds(strTitle, 11, Vector2.new(250, 20))
     local headerW = tBounds.X + (iconName and 26 or 12)
 
     local headerBadge = Library:Create("Frame", {
@@ -2623,6 +2701,11 @@ local function CreateGroupboxContainer(parentColumn, title, iconName)
         Parent = wrapper,
     })
     Library:BindTheme(headerBadge, "BackgroundColor3", "Groupbox")
+    table.insert(Library.LayoutRefreshers, function()
+        if not headerBadge or not headerBadge.Parent then return end
+        local nb = Library:GetTextBounds(strTitle, 11, Vector2.new(250, 20))
+        headerBadge.Size = UDim2.fromOffset(nb.X + (iconName and 26 or 12), 14)
+    end)
 
     Library:Create("UIListLayout", {
         FillDirection = Enum.FillDirection.Horizontal,
@@ -3400,6 +3483,17 @@ function Library:BuildConfigTab(tab)
                 accentPicker:Set(p.Accent, 0)
                 self:SetAccent(p.Accent, p.AccentDark)
             end
+        end
+    })
+
+    themeGroup:AddDropdown({
+        Name = "UI Font Style",
+        Flag = "UI_FontPreset",
+        Values = { "Pixelated (CS Bitmap)", "CS2 Crisp (RobotoMono)", "Skeet Mono (Code)", "Classic (Tahoma)" },
+        Default = "Pixelated (CS Bitmap)",
+        Callback = function(choice)
+            self:SetFontPreset(choice)
+            if self.KeybindList then self.KeybindList:Refresh() end
         end
     })
 
