@@ -91,30 +91,66 @@ local Library = {
 -- LUCIDE ICON REGISTRY (Built-in Lucide sprite IDs + custom asset fallback)
 -- ============================================================================
 local LucideIcons = {
+    -- Tactical / Combat / Aimbot
     ["crosshair"]       = "rbxassetid://10709818534",
     ["target"]          = "rbxassetid://10734977012",
-    ["eye"]             = "rbxassetid://10723346959",
-    ["eye-off"]         = "rbxassetid://10723346871",
-    ["shield"]          = "rbxassetid://10734951847",
-    ["shield-alert"]    = "rbxassetid://10734951173",
-    ["zap"]             = "rbxassetid://10747384394",
-    ["sliders"]         = "rbxassetid://10734963400",
-    ["settings"]        = "rbxassetid://10734950309",
-    ["user"]            = "rbxassetid://10747373176",
-    ["users"]           = "rbxassetid://10747373426",
-    ["skull"]           = "rbxassetid://10734962068",
-    ["flame"]           = "rbxassetid://10723376114",
+    ["scan"]            = "rbxassetid://10734942565",
+    ["focus"]           = "rbxassetid://10723377537",
+    ["locate-fixed"]    = "rbxassetid://10723434557",
     ["swords"]          = "rbxassetid://10734975692",
     ["sword"]           = "rbxassetid://10734975486",
+    ["skull"]           = "rbxassetid://10734962068",
+    ["flame"]           = "rbxassetid://10723376114",
+    ["zap"]             = "rbxassetid://10747384394",
+
+    -- Anti-Aim / Defense / Security
+    ["shield"]          = "rbxassetid://10734951847",
+    ["shield-alert"]    = "rbxassetid://10734951173",
+    ["shield-check"]    = "rbxassetid://10734951367",
+    ["lock"]            = "rbxassetid://10723434711",
+    ["unlock"]          = "rbxassetid://10747366027",
+
+    -- Visuals / ESP / World / Radar
+    ["eye"]             = "rbxassetid://10723346959",
+    ["eye-off"]         = "rbxassetid://10723346871",
+    ["radar"]           = "rbxassetid://10734930886",
+    ["radio"]           = "rbxassetid://10734931596",
+    ["wifi"]            = "rbxassetid://10747382504",
     ["box"]             = "rbxassetid://10709782497",
     ["layers"]          = "rbxassetid://10723424505",
     ["compass"]         = "rbxassetid://10709811445",
     ["globe"]           = "rbxassetid://10723404337",
+    ["sun"]             = "rbxassetid://10734974297",
+    ["moon"]            = "rbxassetid://10734897102",
+    ["camera"]          = "rbxassetid://10709789686",
+    ["video"]           = "rbxassetid://10747374938",
+    ["maximize"]        = "rbxassetid://10723426886",
+
+    -- Players / Movement / Telemetry
+    ["user"]            = "rbxassetid://10747373176",
+    ["users"]           = "rbxassetid://10747373426",
+    ["user-check"]      = "rbxassetid://10747371901",
+    ["user-plus"]       = "rbxassetid://10747372702",
+    ["footprints"]      = "rbxassetid://10723392681",
+    ["wind"]            = "rbxassetid://10747382750",
+    ["activity"]        = "rbxassetid://10709752035",
+    ["gauge"]           = "rbxassetid://10723395708",
+    ["bar-chart"]       = "rbxassetid://10709773755",
+
+    -- System / Config / Controls
+    ["sliders"]         = "rbxassetid://10734963400",
+    ["settings"]        = "rbxassetid://10734950309",
+    ["wrench"]          = "rbxassetid://10747383470",
     ["cpu"]             = "rbxassetid://10709818399",
     ["terminal"]        = "rbxassetid://10734982144",
     ["code"]            = "rbxassetid://10709810463",
     ["folder"]          = "rbxassetid://10723387563",
+    ["file-text"]       = "rbxassetid://10723374840",
     ["save"]            = "rbxassetid://10734941499",
+    ["download"]        = "rbxassetid://10723344270",
+    ["upload"]          = "rbxassetid://10747366434",
+    ["clipboard"]       = "rbxassetid://10709799288",
+    ["copy"]            = "rbxassetid://10709812159",
     ["trash"]           = "rbxassetid://10747362393",
     ["refresh-cw"]      = "rbxassetid://10734933222",
     ["search"]          = "rbxassetid://10734943674",
@@ -123,19 +159,14 @@ local LucideIcons = {
     ["chevron-down"]    = "rbxassetid://10709790948",
     ["chevron-up"]      = "rbxassetid://10709791523",
     ["chevron-right"]   = "rbxassetid://10709791437",
-    ["lock"]            = "rbxassetid://10723434711",
-    ["unlock"]          = "rbxassetid://10747366027",
     ["bell"]            = "rbxassetid://10709775704",
     ["info"]            = "rbxassetid://10723415903",
     ["alert-triangle"]  = "rbxassetid://10709753149",
     ["palette"]         = "rbxassetid://10734910430",
     ["keyboard"]        = "rbxassetid://10723416765",
     ["mouse-pointer"]   = "rbxassetid://10734898592",
-    ["activity"]        = "rbxassetid://10709752035",
-    ["gauge"]           = "rbxassetid://10723395708",
     ["sparkles"]        = "rbxassetid://10734966248",
     ["wand"]            = "rbxassetid://10747376565",
-    ["radar"]           = "rbxassetid://10734930886",
 }
 
 function Library:GetIcon(name)
@@ -607,8 +638,13 @@ function Library:AddTooltip(target, text)
     self:Connect(target.MouseEnter, function()
         local bounds = self:GetTextBounds(text, 12, Vector2.new(500, 100))
         TooltipLabel.Text = text
-        TooltipFrame.Size = UDim2.fromOffset(bounds.X + 18, 22)
+        local pos = UserInputService:GetMouseLocation()
+        TooltipFrame.Position = UDim2.fromOffset(pos.X + 14, pos.Y + 14)
+        TooltipFrame.Size = UDim2.fromOffset(math.max(18, math.floor((bounds.X + 18) * 0.85)), 22)
         TooltipFrame.Visible = true
+        Library:Tween(TooltipFrame, TweenFast, {
+            Size = UDim2.fromOffset(bounds.X + 18, 22),
+        })
     end)
     self:Connect(target.MouseLeave, function()
         TooltipFrame.Visible = false
@@ -618,7 +654,9 @@ end
 Library:Connect(UserInputService.InputChanged, function(input)
     if TooltipFrame.Visible and input.UserInputType == Enum.UserInputType.MouseMovement then
         local pos = UserInputService:GetMouseLocation()
-        TooltipFrame.Position = UDim2.fromOffset(pos.X + 14, pos.Y + 14)
+        Library:Tween(TooltipFrame, TweenInfo.new(0.05, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            Position = UDim2.fromOffset(pos.X + 14, pos.Y + 14)
+        })
     end
 end)
 
@@ -808,7 +846,9 @@ function Library:CreateWatermark(customTitle)
             )
             wmText.Text = str
             local bounds = self:GetTextBounds(str, 12, Vector2.new(700, 24))
-            wmFrame.Size = UDim2.fromOffset(bounds.X + 38, 24)
+            Library:Tween(wmFrame, TweenFast, {
+                Size = UDim2.fromOffset(bounds.X + 38, 24)
+            })
         end
     end)
 
@@ -905,28 +945,39 @@ function Library:CreateKeybindList()
                     ZIndex = 283,
                     Parent = listHolder,
                 })
-                Library:Create("TextLabel", {
+                local nameLbl = Library:Create("TextLabel", {
                     BackgroundTransparency = 1,
+                    Position = UDim2.fromOffset(-6, 0),
                     Size = UDim2.new(0.68, 0, 1, 0),
                     Font = Enum.Font.Code,
                     Text = item.Name,
                     TextColor3 = Library.Theme.Text,
                     TextSize = 12,
+                    TextTransparency = 1,
                     TextXAlignment = Enum.TextXAlignment.Left,
                     ZIndex = 283,
                     Parent = row,
                 })
-                Library:Create("TextLabel", {
+                local modeLbl = Library:Create("TextLabel", {
                     BackgroundTransparency = 1,
-                    Position = UDim2.fromScale(0.68, 0),
+                    Position = UDim2.new(0.68, 6, 0, 0),
                     Size = UDim2.new(0.32, 0, 1, 0),
                     Font = Enum.Font.Code,
                     Text = modeStr,
                     TextColor3 = Library.Theme.Accent,
                     TextSize = 11,
+                    TextTransparency = 1,
                     TextXAlignment = Enum.TextXAlignment.Right,
                     ZIndex = 283,
                     Parent = row,
+                })
+                Library:Tween(nameLbl, TweenFast, {
+                    Position = UDim2.fromOffset(0, 0),
+                    TextTransparency = 0,
+                })
+                Library:Tween(modeLbl, TweenFast, {
+                    Position = UDim2.fromScale(0.68, 0),
+                    TextTransparency = 0,
                 })
             end
         end
@@ -975,13 +1026,34 @@ function Library:CreateKeybindAttachment(parentRow, cfg, toggleLink)
         Parent = parentRow,
     })
     self:BindTheme(btn, "BackgroundColor3", "Element")
-    self:ApplyCSBorder(btn, "InnerBorder")
+    local btnStroke = self:ApplyCSBorder(btn, "InnerBorder")
+
+    self:Connect(btn.MouseEnter, function()
+        if not binding then
+            Library:Tween(btnStroke, TweenFast, { Color = self.Theme.HighlightBorder })
+            Library:Tween(btn, TweenFast, {
+                BackgroundColor3 = self.Theme.ElementHover,
+                TextColor3 = self.Theme.Text,
+            })
+        end
+    end)
+    self:Connect(btn.MouseLeave, function()
+        if not binding then
+            Library:Tween(btnStroke, TweenFast, { Color = self.Theme.InnerBorder })
+            Library:Tween(btn, TweenFast, {
+                BackgroundColor3 = self.Theme.Element,
+                TextColor3 = self.Theme.TextDim,
+            })
+        end
+    end)
 
     local function UpdateButtonSize()
         local txt = binding and "[...]" or ("[" .. self:FormatKey(currentKey) .. "]")
         btn.Text = txt
         local b = self:GetTextBounds(txt, 11, Vector2.new(200, 20))
-        btn.Size = UDim2.fromOffset(math.max(36, b.X + 10), 15)
+        Library:Tween(btn, TweenFast, {
+            Size = UDim2.fromOffset(math.max(36, b.X + 10), 15),
+        })
     end
     UpdateButtonSize()
     table.insert(self.LayoutRefreshers, UpdateButtonSize)
@@ -989,6 +1061,7 @@ function Library:CreateKeybindAttachment(parentRow, cfg, toggleLink)
     -- Mode Popup (Hold / Toggle / Always)
     local modePopup = self:Create("Frame", {
         BackgroundColor3 = self.Theme.Background,
+        ClipsDescendants = true,
         Size = UDim2.fromOffset(78, 62),
         Visible = false,
         ZIndex = 350,
@@ -996,6 +1069,9 @@ function Library:CreateKeybindAttachment(parentRow, cfg, toggleLink)
     })
     self:BindTheme(modePopup, "BackgroundColor3", "Background")
     self:ApplyCSBorder(modePopup, "HighlightBorder")
+
+    local modePopupOpen = false
+    local modeToken = 0
 
     local modeList = self:Create("Frame", {
         BackgroundTransparency = 1,
@@ -1013,10 +1089,19 @@ function Library:CreateKeybindAttachment(parentRow, cfg, toggleLink)
     local popupCtrl = {
         Frames = { modePopup, btn },
         IsOpen = function()
-            return modePopup.Visible
+            return modePopupOpen and modePopup.Visible
         end,
         Close = function()
-            modePopup.Visible = false
+            if not modePopupOpen and not modePopup.Visible then return end
+            modePopupOpen = false
+            modeToken += 1
+            local tok = modeToken
+            Library:Tween(modePopup, TweenFast, { Size = UDim2.fromOffset(78, 0) })
+            task.delay(0.14, function()
+                if modeToken == tok and not modePopupOpen then
+                    modePopup.Visible = false
+                end
+            end)
         end
     }
     table.insert(self.OpenPopups, popupCtrl)
@@ -1053,7 +1138,7 @@ function Library:CreateKeybindAttachment(parentRow, cfg, toggleLink)
         self:Connect(mBtn.InputBegan, function(input)
             if input.UserInputType == Enum.UserInputType.MouseButton1 then
                 Keybind:SetMode(m)
-                modePopup.Visible = false
+                popupCtrl.Close()
             end
         end)
     end
@@ -1103,21 +1188,27 @@ function Library:CreateKeybindAttachment(parentRow, cfg, toggleLink)
     self:Connect(btn.InputBegan, function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             Library:ClosePopups(popupCtrl)
-            modePopup.Visible = false
+            popupCtrl.Close()
             binding = true
-            btn.TextColor3 = self.Theme.Accent
+            Library:Tween(btnStroke, TweenFast, { Color = self.Theme.Accent })
+            Library:Tween(btn, TweenFast, { TextColor3 = self.Theme.Accent })
             UpdateButtonSize()
         elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
             binding = false
-            btn.TextColor3 = self.Theme.TextDim
+            Library:Tween(btnStroke, TweenFast, { Color = self.Theme.InnerBorder })
+            Library:Tween(btn, TweenFast, { TextColor3 = self.Theme.TextDim })
             UpdateButtonSize()
-            local willShow = not modePopup.Visible
+            local willShow = not modePopupOpen
             Library:ClosePopups(popupCtrl)
             if willShow then
+                modePopupOpen = true
+                modeToken += 1
                 UpdateModePopupPos()
+                modePopup.Size = UDim2.fromOffset(78, 0)
                 modePopup.Visible = true
+                Library:Tween(modePopup, TweenFast, { Size = UDim2.fromOffset(78, 62) })
             else
-                modePopup.Visible = false
+                popupCtrl.Close()
             end
         end
     end)
@@ -1133,7 +1224,8 @@ function Library:CreateKeybindAttachment(parentRow, cfg, toggleLink)
             if input.UserInputType == Enum.UserInputType.Keyboard then
                 if input.KeyCode == Enum.KeyCode.Unknown then return end
                 binding = false
-                btn.TextColor3 = self.Theme.TextDim
+                Library:Tween(btnStroke, TweenFast, { Color = self.Theme.InnerBorder })
+                Library:Tween(btn, TweenFast, { TextColor3 = self.Theme.TextDim })
                 if input.KeyCode == Enum.KeyCode.Escape or input.KeyCode == Enum.KeyCode.Backspace then
                     Keybind:Set(Enum.KeyCode.Unknown)
                 else
@@ -1142,7 +1234,8 @@ function Library:CreateKeybindAttachment(parentRow, cfg, toggleLink)
             elseif input.UserInputType == Enum.UserInputType.MouseButton2
                 or input.UserInputType == Enum.UserInputType.MouseButton3 then
                 binding = false
-                btn.TextColor3 = self.Theme.TextDim
+                Library:Tween(btnStroke, TweenFast, { Color = self.Theme.InnerBorder })
+                Library:Tween(btn, TweenFast, { TextColor3 = self.Theme.TextDim })
                 Keybind:Set(input.UserInputType)
             end
             return
@@ -1222,7 +1315,14 @@ function Library:CreateColorPickerAttachment(parentRow, cfg)
         ZIndex = 12,
         Parent = parentRow,
     })
-    self:ApplyCSBorder(swatch, "InnerBorder")
+    local swatchStroke = self:ApplyCSBorder(swatch, "InnerBorder")
+
+    self:Connect(swatch.MouseEnter, function()
+        Library:Tween(swatchStroke, TweenFast, { Color = self.Theme.Accent })
+    end)
+    self:Connect(swatch.MouseLeave, function()
+        Library:Tween(swatchStroke, TweenFast, { Color = self.Theme.InnerBorder })
+    end)
 
     self:Create("UIGradient", {
         Color = ColorSequence.new({
@@ -1237,6 +1337,7 @@ function Library:CreateColorPickerAttachment(parentRow, cfg)
     local popup = self:Create("Frame", {
         Name = "ColorPopup",
         BackgroundColor3 = self.Theme.Background,
+        ClipsDescendants = true,
         Size = UDim2.fromOffset(215, 238),
         Visible = false,
         ZIndex = 360,
@@ -1246,13 +1347,25 @@ function Library:CreateColorPickerAttachment(parentRow, cfg)
     self:ApplyCSBorder(popup, "HighlightBorder")
     self:CreateAccentBar(popup, 362)
 
+    local popupOpen = false
+    local popupToken = 0
+
     local popupCtrl = {
         Frames = { popup, swatch },
         IsOpen = function()
-            return popup.Visible
+            return popupOpen and popup.Visible
         end,
         Close = function()
-            popup.Visible = false
+            if not popupOpen and not popup.Visible then return end
+            popupOpen = false
+            popupToken += 1
+            local tok = popupToken
+            Library:Tween(popup, TweenFast, { Size = UDim2.fromOffset(215, 0) })
+            task.delay(0.14, function()
+                if popupToken == tok and not popupOpen then
+                    popup.Visible = false
+                end
+            end)
         end
     }
     table.insert(self.OpenPopups, popupCtrl)
@@ -1435,9 +1548,10 @@ function Library:CreateColorPickerAttachment(parentRow, cfg)
         swatch.BackgroundColor3 = col
         svBox.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
         alphaBar.BackgroundColor3 = col
-        svCursor.Position = UDim2.fromScale(s, 1 - v)
-        hueCursor.Position = UDim2.new(0.5, 0, h, 0)
-        alphaCursor.Position = UDim2.new(1 - alpha, 0, 0.5, 0)
+        local cInfo = TweenInfo.new(0.06, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+        Library:Tween(svCursor, cInfo, { Position = UDim2.fromScale(s, 1 - v) })
+        Library:Tween(hueCursor, cInfo, { Position = UDim2.new(0.5, 0, h, 0) })
+        Library:Tween(alphaCursor, cInfo, { Position = UDim2.new(1 - alpha, 0, 0.5, 0) })
         hexInput.Text = ToHex(col)
         Library.Flags[flag] = col
         if Library.ESPPreview then
@@ -1581,16 +1695,25 @@ function Library:CreateColorPickerAttachment(parentRow, cfg)
 
     self:Connect(swatch.InputBegan, function(input)
         if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
-        local willShow = not popup.Visible
+        local willShow = not popupOpen
         Library:ClosePopups(popupCtrl)
         if willShow then
+            popupOpen = true
+            popupToken += 1
             local abs = swatch.AbsolutePosition
             local insetY = self:GetGuiInsetY()
             local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1920, 1080)
             local px = math.clamp(abs.X - 185, 6, math.max(6, vp.X - 225))
             local py = math.clamp(abs.Y + insetY + 18, 6, math.max(6, vp.Y - 246))
-            popup.Position = UDim2.fromOffset(px, py)
+            popup.Position = UDim2.fromOffset(px, py - 4)
+            popup.Size = UDim2.fromOffset(215, 0)
             popup.Visible = true
+            Library:Tween(popup, TweenFast, {
+                Position = UDim2.fromOffset(px, py),
+                Size = UDim2.fromOffset(215, 238),
+            })
+        else
+            popupCtrl.Close()
         end
     end)
 
@@ -2655,14 +2778,51 @@ function GroupboxMethods:AddListbox(cfg)
                 BackgroundTransparency = isSel and 0 or 1,
                 AutoButtonColor = false,
                 Size = UDim2.new(1, 0, 0, 18),
-                Font = isSel and Enum.Font.GothamBold or Enum.Font.Code,
-                Text = "  " .. tostring(item),
-                TextColor3 = isSel and Library.Theme.Accent or Library.Theme.TextDim,
-                TextSize = 12,
-                TextXAlignment = Enum.TextXAlignment.Left,
+                Text = "",
                 ZIndex = 12,
                 Parent = scroll,
             })
+            local selBar = Library:Create("Frame", {
+                BackgroundColor3 = Library.Theme.Accent,
+                BorderSizePixel = 0,
+                Size = isSel and UDim2.new(0, 2, 1, 0) or UDim2.new(0, 0, 1, 0),
+                ZIndex = 13,
+                Parent = row,
+            })
+            Library:BindTheme(selBar, "BackgroundColor3", "Accent")
+            local rowLbl = Library:Create("TextLabel", {
+                BackgroundTransparency = 1,
+                Position = UDim2.fromOffset(isSel and 8 or 6, 0),
+                Size = UDim2.new(1, -12, 1, 0),
+                Font = isSel and Enum.Font.GothamBold or Enum.Font.Code,
+                Text = tostring(item),
+                TextColor3 = isSel and Library.Theme.Accent or Library.Theme.TextDim,
+                TextSize = 12,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                ZIndex = 13,
+                Parent = row,
+            })
+            Library:Connect(row.MouseEnter, function()
+                if not isSel then
+                    Library:Tween(row, TweenFast, {
+                        BackgroundColor3 = Library.Theme.ElementHover,
+                        BackgroundTransparency = 0.4,
+                    })
+                    Library:Tween(rowLbl, TweenFast, {
+                        Position = UDim2.fromOffset(9, 0),
+                        TextColor3 = Library.Theme.Text,
+                    })
+                end
+            end)
+            Library:Connect(row.MouseLeave, function()
+                if not isSel then
+                    Library:Tween(row, TweenFast, { BackgroundTransparency = 1 })
+                    Library:Tween(rowLbl, TweenFast, {
+                        Position = UDim2.fromOffset(6, 0),
+                        TextColor3 = Library.Theme.TextDim,
+                    })
+                end
+            end)
             Library:Connect(row.MouseButton1Click, function()
                 if multi then
                     selected[item] = not selected[item] or nil
@@ -2916,12 +3076,27 @@ function GroupboxMethods:AddInput(cfg)
 
     Library:Connect(tBox.Focused, function()
         Library:Tween(boxStroke, TweenFast, { Color = Library.Theme.Accent })
+        Library:Tween(titleLbl, TweenFast, { TextColor3 = Library.Theme.Text })
+        Library:Tween(boxWrap, TweenFast, { BackgroundColor3 = Library.Theme.ElementHover })
     end)
 
     Library:Connect(tBox.FocusLost, function(enterPressed)
         Library:Tween(boxStroke, TweenFast, { Color = Library.Theme.InnerBorder })
+        Library:Tween(titleLbl, TweenFast, { TextColor3 = Library.Theme.TextDim })
+        Library:Tween(boxWrap, TweenFast, { BackgroundColor3 = Library.Theme.Element })
         if not cfg.OnlyOnEnter or enterPressed then
             InputObj:Set(tBox.Text)
+        end
+    end)
+
+    Library:Connect(boxWrap.MouseEnter, function()
+        if not tBox:IsFocused() then
+            Library:Tween(boxStroke, TweenFast, { Color = Library.Theme.HighlightBorder })
+        end
+    end)
+    Library:Connect(boxWrap.MouseLeave, function()
+        if not tBox:IsFocused() then
+            Library:Tween(boxStroke, TweenFast, { Color = Library.Theme.InnerBorder })
         end
     end)
 
@@ -3124,7 +3299,7 @@ local function CreateGroupboxContainer(parentColumn, title, iconName)
         Parent = wrapper,
     })
     Library:BindTheme(box, "BackgroundColor3", "Groupbox")
-    Library:ApplyCSBorder(box, "InnerBorder")
+    local boxStroke = Library:ApplyCSBorder(box, "InnerBorder")
 
     -- Subtle top accent bar along the groupbox header
     local topStripe = Library:Create("Frame", {
@@ -3137,6 +3312,14 @@ local function CreateGroupboxContainer(parentColumn, title, iconName)
     })
     Library:BindTheme(topStripe, "BackgroundColor3", "Accent")
 
+    Library:Connect(box.MouseEnter, function()
+        Library:Tween(topStripe, TweenFast, { BackgroundTransparency = 0.08 })
+        Library:Tween(boxStroke, TweenFast, { Color = Library.Theme.HighlightBorder })
+    end)
+    Library:Connect(box.MouseLeave, function()
+        Library:Tween(topStripe, TweenFast, { BackgroundTransparency = 0.45 })
+        Library:Tween(boxStroke, TweenFast, { Color = Library.Theme.InnerBorder })
+    end)
     -- Classic CS:GO Overlapping Title Pill on the Top Border
     local strTitle = string.upper(tostring(title or "GROUP"))
     local tBounds = Library:GetTextBounds(strTitle, 11, Vector2.new(250, 20), true)
@@ -3208,7 +3391,9 @@ local function CreateGroupboxContainer(parentColumn, title, iconName)
     Library:Connect(layout:GetPropertyChangedSignal("AbsoluteContentSize"), function()
         local contentH = layout.AbsoluteContentSize.Y
         container.Size = UDim2.new(1, -20, 0, contentH)
-        wrapper.Size = UDim2.new(1, 0, 0, contentH + 30)
+        Library:Tween(wrapper, TweenFast, {
+            Size = UDim2.new(1, 0, 0, contentH + 30)
+        })
     end)
 
     return setmetatable({
@@ -3278,7 +3463,9 @@ local function CreateTabboxContainer(parentColumn, title)
         if Tabbox.ActiveTab then
             local h = Tabbox.ActiveTab.Layout.AbsoluteContentSize.Y
             Tabbox.ActiveTab.Container.Size = UDim2.new(1, -20, 0, h)
-            wrapper.Size = UDim2.new(1, 0, 0, h + 42)
+            Library:Tween(wrapper, TweenFast, {
+                Size = UDim2.new(1, 0, 0, h + 42)
+            })
         end
     end
 
@@ -3297,9 +3484,11 @@ local function CreateTabboxContainer(parentColumn, title)
         })
 
         local topLine = Library:Create("Frame", {
+            AnchorPoint = Vector2.new(0.5, 0),
             BackgroundColor3 = Library.Theme.Accent,
             BorderSizePixel = 0,
-            Size = UDim2.new(1, 0, 0, 2),
+            Position = UDim2.fromScale(0.5, 0),
+            Size = UDim2.new(0, 0, 0, 2),
             BackgroundTransparency = 1,
             ZIndex = 9,
             Parent = btn,
@@ -3342,18 +3531,42 @@ local function CreateTabboxContainer(parentColumn, title)
                     BackgroundColor3 = Library.Theme.Sidebar,
                     TextColor3 = Library.Theme.TextDim,
                 })
-                Library:Tween(other.TopLine, TweenFast, { BackgroundTransparency = 1 })
+                Library:Tween(other.TopLine, TweenFast, {
+                    Size = UDim2.new(0, 0, 0, 2),
+                    BackgroundTransparency = 1,
+                })
             end
             Tabbox.ActiveTab = subTabObj
             container.Visible = true
+            container.Position = UDim2.fromOffset(10, 36)
+            Library:Tween(container, TweenFast, { Position = UDim2.fromOffset(10, 32) })
             Library:Tween(btn, TweenFast, {
                 BackgroundColor3 = Library.Theme.Groupbox,
                 TextColor3 = Library.Theme.Text,
             })
-            Library:Tween(topLine, TweenFast, { BackgroundTransparency = 0 })
+            Library:Tween(topLine, TweenMedium, {
+                Size = UDim2.new(1, 0, 0, 2),
+                BackgroundTransparency = 0,
+            })
             UpdateWrapperHeight()
         end
 
+        Library:Connect(btn.MouseEnter, function()
+            if Tabbox.ActiveTab ~= subTabObj then
+                Library:Tween(btn, TweenFast, {
+                    BackgroundColor3 = Library.Theme.Element,
+                    TextColor3 = Library.Theme.Text,
+                })
+            end
+        end)
+        Library:Connect(btn.MouseLeave, function()
+            if Tabbox.ActiveTab ~= subTabObj then
+                Library:Tween(btn, TweenFast, {
+                    BackgroundColor3 = Library.Theme.Sidebar,
+                    TextColor3 = Library.Theme.TextDim,
+                })
+            end
+        end)
         Library:Connect(btn.MouseButton1Click, Select)
         table.insert(Tabbox.Tabs, subTabObj)
         RecalcButtonWidths()
@@ -3879,11 +4092,19 @@ function Library:CreateWindow(cfg)
                 Library:Tween(other.Button, TweenFast, { BackgroundTransparency = 1 })
                 Library:Tween(other.Border, TweenFast, { Transparency = 1 })
                 Library:Tween(other.ActiveBar, TweenFast, { Size = UDim2.new(0, 2, 0, 0) })
-                Library:Tween(other.Icon, TweenFast, { ImageColor3 = Library.Theme.TextDim })
-                Library:Tween(other.Label, TweenFast, { TextColor3 = Library.Theme.TextDim })
+                Library:Tween(other.Icon, TweenFast, {
+                    Position = UDim2.new(0, 10, 0.5, 0),
+                    ImageColor3 = Library.Theme.TextDim,
+                })
+                Library:Tween(other.Label, TweenFast, {
+                    Position = UDim2.fromOffset(32, 0),
+                    TextColor3 = Library.Theme.TextDim,
+                })
             end
             Window.ActiveTab = Tab
             page.Visible = true
+            page.Position = UDim2.fromOffset(10, 16)
+            Library:Tween(page, TweenMedium, { Position = UDim2.fromOffset(10, 10) })
             Library:Tween(tabBtn, TweenFast, {
                 BackgroundColor3 = Library.Theme.Element,
                 BackgroundTransparency = 0,
@@ -3893,8 +4114,14 @@ function Library:CreateWindow(cfg)
                 Transparency = 0,
             })
             Library:Tween(activeBar, TweenMedium, { Size = UDim2.new(0, 2, 1, -6) })
-            Library:Tween(iconImg, TweenFast, { ImageColor3 = Library.Theme.Accent })
-            Library:Tween(tabLbl, TweenFast, { TextColor3 = Library.Theme.Text })
+            Library:Tween(iconImg, TweenFast, {
+                Position = UDim2.new(0, 11, 0.5, 0),
+                ImageColor3 = Library.Theme.Accent,
+            })
+            Library:Tween(tabLbl, TweenFast, {
+                Position = UDim2.fromOffset(34, 0),
+                TextColor3 = Library.Theme.Text,
+            })
             Window.TabChanged:Fire(Tab)
             if Window.ESPPreview then
                 Window.ESPPreview:SyncVisibility()
@@ -3923,14 +4150,28 @@ function Library:CreateWindow(cfg)
                     BackgroundColor3 = Library.Theme.Element,
                     BackgroundTransparency = 0.45,
                 })
-                Library:Tween(tabLbl, TweenFast, { TextColor3 = Library.Theme.Text })
+                Library:Tween(iconImg, TweenFast, {
+                    Position = UDim2.new(0, 11, 0.5, 0),
+                    ImageColor3 = Library.Theme.Text,
+                })
+                Library:Tween(tabLbl, TweenFast, {
+                    Position = UDim2.fromOffset(34, 0),
+                    TextColor3 = Library.Theme.Text,
+                })
             end
         end)
 
         Library:Connect(tabBtn.MouseLeave, function()
             if Window.ActiveTab ~= Tab then
                 Library:Tween(tabBtn, TweenFast, { BackgroundTransparency = 1 })
-                Library:Tween(tabLbl, TweenFast, { TextColor3 = Library.Theme.TextDim })
+                Library:Tween(iconImg, TweenFast, {
+                    Position = UDim2.new(0, 10, 0.5, 0),
+                    ImageColor3 = Library.Theme.TextDim,
+                })
+                Library:Tween(tabLbl, TweenFast, {
+                    Position = UDim2.fromOffset(32, 0),
+                    TextColor3 = Library.Theme.TextDim,
+                })
             end
         end)
 
@@ -4212,7 +4453,7 @@ function Library:CreateESPPreview(window, targetTab)
         flagLabels[fInfo.Key] = fl
     end
 
-    local function SyncPosition()
+    local function SyncPosition(animate)
         if not main or not main.Parent then return end
         local absPos = main.AbsolutePosition
         local absSize = main.AbsoluteSize
@@ -4223,7 +4464,14 @@ function Library:CreateESPPreview(window, targetTab)
             px = math.max(6, absPos.X - 215)
         end
         local py = absPos.Y + insetY
-        panel.Position = UDim2.fromOffset(px, py)
+        if animate then
+            panel.Position = UDim2.fromOffset(px - 6, py)
+            Library:Tween(panel, TweenMedium, { Position = UDim2.fromOffset(px, py) })
+        else
+            Library:Tween(panel, TweenInfo.new(0.06, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+                Position = UDim2.fromOffset(px, py)
+            })
+        end
     end
 
     local PreviewObj = { Frame = panel }
@@ -4260,14 +4508,20 @@ function Library:CreateESPPreview(window, targetTab)
         local xqzCol = Library.Flags["Chams_XQZCol"] or Color3.fromRGB(60, 145, 245)
         for _, bp in ipairs(bodyParts) do
             if visChams then
-                bp.Frame.BackgroundColor3 = visCol
-                bp.Frame.BackgroundTransparency = 0.18
+                Library:Tween(bp.Frame, TweenFast, {
+                    BackgroundColor3 = visCol,
+                    BackgroundTransparency = 0.18,
+                })
             elseif xqzChams then
-                bp.Frame.BackgroundColor3 = xqzCol
-                bp.Frame.BackgroundTransparency = 0.35
+                Library:Tween(bp.Frame, TweenFast, {
+                    BackgroundColor3 = xqzCol,
+                    BackgroundTransparency = 0.35,
+                })
             else
-                bp.Frame.BackgroundColor3 = Color3.fromRGB(52, 54, 66)
-                bp.Frame.BackgroundTransparency = 0.25
+                Library:Tween(bp.Frame, TweenFast, {
+                    BackgroundColor3 = Color3.fromRGB(52, 54, 66),
+                    BackgroundTransparency = 0.25,
+                })
             end
         end
 
@@ -4283,9 +4537,10 @@ function Library:CreateESPPreview(window, targetTab)
 
     function PreviewObj:SyncVisibility()
         local isOnTab = window.ActiveTab and (window.ActiveTab.Name == targetTabName)
+        local wasVisible = panel.Visible
         panel.Visible = (Library.Open and previewEnabled and isOnTab) and true or false
         if panel.Visible then
-            SyncPosition()
+            SyncPosition(not wasVisible)
             PreviewObj:Refresh()
         end
     end
@@ -4485,7 +4740,7 @@ function Library:BuildConfigTab(tab)
     })
 
     -- Right Side Config Manager
-    local cfgGroup = tab:AddRightGroupbox("Configuration", "folder")
+    local cfgGroup = tab:AddRightGroupbox("Configuration", "file-text")
     local cfgName = "legit_default"
     local selectedCfg = "legit_default"
     local savedMemoryConfigs = {
@@ -4536,7 +4791,7 @@ function Library:BuildConfigTab(tab)
 
     createBtn:AddButton({
         Name = "Load Config",
-        Icon = "folder",
+        Icon = "download",
         Callback = function()
             local raw = savedMemoryConfigs[selectedCfg]
             pcall(function()
@@ -4554,13 +4809,13 @@ function Library:BuildConfigTab(tab)
 
     cfgGroup:AddButton({
         Name = "Export Config to Clipboard",
-        Icon = "code",
+        Icon = "clipboard",
         Callback = function()
             local json = self:GetConfigJSON()
             pcall(function()
                 if setclipboard then setclipboard(json) end
             end)
-            self:Notify({ Title = "Clipboard", Description = "Exported JSON config string.", Icon = "code" })
+            self:Notify({ Title = "Clipboard", Description = "Exported JSON config string.", Icon = "clipboard" })
         end
     })
 end
