@@ -1165,7 +1165,7 @@ function Library:AddHitlog(cfg)
         if self.FlashHitmarker then
             pcall(function() self:FlashHitmarker(dmgVal, isHead) end)
         end
-        if self.WorldController and self.WorldController.SpawnTracer then
+        if self.WorldController and self.WorldController.SpawnTracer and not self.WorldController.WasRecentTracer() then
             pcall(function() self.WorldController.SpawnTracer(cfg.Target) end)
         end
     end
@@ -2870,11 +2870,56 @@ function Library:CreateWorldController()
     local lastTrigFire = 0
     local trigAcquireTime = nil
     local lastRageFire = 0
+    local lastLocalShotTime = 0
+    local lastLocalShotTarget = nil
+    local lastTracerSpawnTime = 0
     local vimService = nil
     pcall(function() vimService = game:GetService("VirtualInputManager") end)
 
-    local function FireWeapon(myChar, mPos)
+    local function GetMuzzleOrigin(cam)
+        local myChar = LocalPlayer and LocalPlayer.Character
+        -- 1) Counter Blox first-person viewmodel (workspace.CurrentCamera.Arms)
+        if not self.Flags["World_TP"] and cam then
+            local arms = cam:FindFirstChild("Arms") or cam:FindFirstChild("Viewmodel") or cam:FindFirstChild("ViewModel")
+            if arms then
+                for _, name in ipairs({ "Flash", "Muzzle", "SmokePart", "Barrel", "Tip", "MuzzleAttachment" }) do
+                    local part = arms:FindFirstChild(name, true)
+                    if part then
+                        if part:IsA("Attachment") then
+                            return part.WorldPosition
+                        elseif part:IsA("BasePart") then
+                            return part.Position
+                        end
+                    end
+                end
+            end
+            -- First-person bottom-right gun barrel offset (never from the center of the head)
+            return cam.CFrame:PointToWorldSpace(Vector3.new(0.52, -0.38, -1.65))
+        end
+
+        -- 2) Third-person / world character right hand or gun barrel
+        if myChar then
+            for _, name in ipairs({ "Flash", "Muzzle", "Barrel", "RightHand", "Right Arm" }) do
+                local part = myChar:FindFirstChild(name, true)
+                if part and part:IsA("BasePart") then
+                    return part.Position + (cam and cam.CFrame.LookVector * 1.1 or Vector3.zero)
+                end
+            end
+            local hrp = myChar:FindFirstChild("HumanoidRootPart") or myChar:FindFirstChild("Torso") or myChar.PrimaryPart
+            if hrp then
+                return hrp.CFrame:PointToWorldSpace(Vector3.new(0.85, 0.35, -1.5))
+            end
+        end
+
+        return cam and cam.CFrame:PointToWorldSpace(Vector3.new(0.52, -0.38, -1.65)) or Vector3.zero
+    end
+
+    local function FireWeapon(myChar, mPos, targetPlr)
         if self.Open then return end
+        lastLocalShotTime = os.clock()
+        if targetPlr then
+            lastLocalShotTarget = targetPlr
+        end
         local eqTool = myChar and myChar:FindFirstChildOfClass("Tool")
         if eqTool then
             pcall(function() eqTool:Activate() end)
@@ -2959,13 +3004,8 @@ function Library:CreateWorldController()
         if not self.Flags["World_Beams"] or self.Unloaded then return end
         local cam = workspace.CurrentCamera
         if not cam then return end
-        local startPos = cam.CFrame.Position - Vector3.new(0, 0.4, 0)
-        if LocalPlayer and LocalPlayer.Character then
-            local head = LocalPlayer.Character:FindFirstChild("Head") or LocalPlayer.Character.PrimaryPart
-            if head then
-                startPos = head.Position
-            end
-        end
+        lastTracerSpawnTime = os.clock()
+        local startPos = GetMuzzleOrigin(cam)
 
         local endPos
         if typeof(targetNameOrPos) == "Vector3" then
@@ -2973,14 +3013,18 @@ function Library:CreateWorldController()
         elseif type(targetNameOrPos) == "string" then
             local tPlr = Players:FindFirstChild(targetNameOrPos)
             if tPlr and tPlr.Character then
-                local tPart = tPlr.Character:FindFirstChild("Head") or tPlr.Character:FindFirstChild("HumanoidRootPart") or tPlr.Character.PrimaryPart
+                local tPart = tPlr.Character:FindFirstChild("UpperTorso")
+                    or tPlr.Character:FindFirstChild("Torso")
+                    or tPlr.Character:FindFirstChild("HumanoidRootPart")
+                    or tPlr.Character:FindFirstChild("Head")
+                    or tPlr.Character.PrimaryPart
                 if tPart then
                     endPos = tPart.Position
                 end
             end
         end
         if not endPos then
-            endPos = startPos + cam.CFrame.LookVector * 55 + Vector3.new(math.random(-20, 20) * 0.1, math.random(-10, 10) * 0.1, 0)
+            endPos = cam.CFrame.Position + cam.CFrame.LookVector * 85
         end
 
         local dist = (endPos - startPos).Magnitude
@@ -3372,23 +3416,43 @@ function Library:CreateWorldController()
             local oldHp = trackedHealth[plr] or maxHp or 100
             trackedHealth[plr] = newHp
             local diff = math.floor((oldHp - newHp) + 0.5)
-            if diff > 0 and (Library.Flags["ESP_Box"] or Library.Flags["ESP_Name"] or Library.Flags["Rage_Enabled"]) then
-                local rem = math.max(0, math.floor(newHp + 0.5))
-                Library:AddHitlog({
-                    Target = plr.Name,
-                    Hitbox = "chest",
-                    Damage = diff,
-                    Remaining = rem,
-                    Hitchance = Library.Flags["Rage_Hitchance"] or 84,
-                })
-                if Library.TargetHUD then
-                    Library.TargetHUD:SetTarget({
-                        Name = plr.Name,
-                        UserId = plr.UserId,
-                        HP = rem,
-                        MaxHP = math.floor((maxHp or 100) + 0.5),
-                    })
+            if diff <= 0 then return end
+
+            -- Only log hits / play hitsound / spawn tracer when LocalPlayer actually fired a shot at this enemy
+            local now = os.clock()
+            if (now - lastLocalShotTime) > 0.30 then return end
+            local tel = self:GetPlayerTelemetry(plr)
+            if tel and tel.IsTeammate and self.Flags["ESP_TeamCheck"] then return end
+
+            local isOurTarget = (lastLocalShotTarget == plr)
+            if not isOurTarget then
+                local cam = workspace.CurrentCamera
+                local hrp = tel and tel.RootPart or (plr.Character and plr.Character:FindFirstChild("HumanoidRootPart"))
+                if cam and hrp then
+                    local dir = (hrp.Position - cam.CFrame.Position)
+                    if dir.Magnitude > 0.1 then
+                        local dot = cam.CFrame.LookVector:Dot(dir.Unit)
+                        isOurTarget = (dot >= 0.965) -- within ~15 deg cone of our shot
+                    end
                 end
+            end
+            if not isOurTarget then return end
+
+            local rem = math.max(0, math.floor(newHp + 0.5))
+            Library:AddHitlog({
+                Target = plr.Name,
+                Hitbox = "chest",
+                Damage = diff,
+                Remaining = rem,
+                Hitchance = Library.Flags["Rage_Hitchance"] or 84,
+            })
+            if Library.TargetHUD then
+                Library.TargetHUD:SetTarget({
+                    Name = plr.Name,
+                    UserId = plr.UserId,
+                    HP = rem,
+                    MaxHP = math.floor((maxHp or 100) + 0.5),
+                })
             end
         end
 
@@ -3447,6 +3511,49 @@ function Library:CreateWorldController()
             cards[plr] = nil
         end
         trackedHealth[plr] = nil
+    end)
+
+    -- Track manual Left-Click shots from LocalPlayer so tracers & hitsounds only fire on our own shots
+    self:Connect(UserInputService.InputBegan, function(input, gpe)
+        if self.Unloaded or self.Open then return end
+        if UserInputService:GetFocusedTextBox() ~= nil then return end
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            local myTel = LocalPlayer and self:GetPlayerTelemetry(LocalPlayer)
+            if myTel and not myTel.Alive then return end
+            lastLocalShotTime = os.clock()
+            local cam = workspace.CurrentCamera
+            if not cam then return end
+            local mPos = UserInputService:GetMouseLocation()
+            local myChar = LocalPlayer and LocalPlayer.Character
+            local baseIgnore = { cam, beamFolder }
+            if myChar then table.insert(baseIgnore, myChar) end
+            local rayIgnore = workspace:FindFirstChild("Ray_Ignore")
+            if rayIgnore then table.insert(baseIgnore, rayIgnore) end
+            local debrisFolder = workspace:FindFirstChild("Debris")
+            if debrisFolder then table.insert(baseIgnore, debrisFolder) end
+            local clipsFolder = workspace:FindFirstChild("Clips")
+            if clipsFolder then table.insert(baseIgnore, clipsFolder) end
+            local mapFolder = workspace:FindFirstChild("Map")
+            if mapFolder and mapFolder:FindFirstChild("Clips") then
+                table.insert(baseIgnore, mapFolder.Clips)
+            end
+
+            local unitRay = cam:ViewportPointToRay(mPos.X, mPos.Y)
+            local hit = RaycastPierceClips(unitRay.Origin, unitRay.Direction * 900, baseIgnore)
+            local hitPos = hit and hit.Position or (unitRay.Origin + unitRay.Direction * 180)
+            lastLocalShotTarget = nil
+            if hit and hit.Instance then
+                for _, plr in ipairs(Players:GetPlayers()) do
+                    if plr ~= LocalPlayer and plr.Character and hit.Instance:IsDescendantOf(plr.Character) then
+                        lastLocalShotTarget = plr
+                        break
+                    end
+                end
+            end
+            if self.Flags["World_Beams"] and (os.clock() - lastTracerSpawnTime) > 0.04 then
+                SpawnTracer(hitPos)
+            end
+        end
     end)
 
     -- Infinite Jump Listener
@@ -4266,8 +4373,8 @@ function Library:CreateWorldController()
                         local fireCooldown = (F["Rage_DT"] == true) and 0.06 or 0.14
                         if F["Rage_AutoFire"] and (os.clock() - lastRageFire) >= fireCooldown then
                             lastRageFire = os.clock()
-                            FireWeapon(myChar, mPos)
-                            SpawnTracer(bestPlr and bestPlr.Name or aimPos)
+                            FireWeapon(myChar, mPos, bestPlr)
+                            SpawnTracer(bestAimPart.Position)
                         end
                     else
                         local smooth = math.max(1, tonumber(F["Legit_Smooth"]) or 6.5)
@@ -4333,12 +4440,22 @@ function Library:CreateWorldController()
                     if not trigAcquireTime then
                         trigAcquireTime = now
                     end
+                    local isAccurate = true
+                    if F["Trig_AccurateOnly"] == true then
+                        local grounded = (not myHum) or (myHum.FloorMaterial ~= Enum.Material.Air)
+                        local horizSpd = 0
+                        if myHrp then
+                            local v = myHrp.AssemblyLinearVelocity
+                            horizSpd = Vector2.new(v.X, v.Z).Magnitude
+                        end
+                        isAccurate = grounded and (horizSpd <= 2.5)
+                    end
                     local delaySec = math.max(0, (tonumber(F["Trig_Delay"]) or 0) / 1000)
-                    local fireInterval = (F["Rage_DT"] == true) and 0.05 or 0.08
-                    if (now - trigAcquireTime) >= delaySec and (now - lastTrigFire) >= fireInterval then
+                    local fireInterval = (F["Trig_AccurateOnly"] == true) and 0.22 or ((F["Rage_DT"] == true) and 0.05 or 0.08)
+                    if isAccurate and (now - trigAcquireTime) >= delaySec and (now - lastTrigFire) >= fireInterval then
                         lastTrigFire = now
-                        FireWeapon(myChar, mPos)
-                        SpawnTracer(hitEnemyPlr.Name)
+                        FireWeapon(myChar, mPos, hitEnemyPlr)
+                        SpawnTracer(hit and hit.Position or hitEnemyPlr.Name)
                     end
                 else
                     trigAcquireTime = nil
@@ -4387,6 +4504,9 @@ function Library:CreateWorldController()
     self.WorldController = {
         Folder = overlayFolder,
         SpawnTracer = SpawnTracer,
+        WasRecentTracer = function()
+            return (os.clock() - lastTracerSpawnTime) < 0.12
+        end,
         Cleanup = function()
             pcall(function() RunService:UnbindFromRenderStep("ShardsAspectStretch") end)
             for plr in pairs(playerConns) do
