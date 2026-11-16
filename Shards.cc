@@ -3172,8 +3172,8 @@ function Library:CreateWindow(cfg)
             local maxH = math.max(leftLayout.AbsoluteContentSize.Y, rightLayout.AbsoluteContentSize.Y)
             page.CanvasSize = UDim2.fromOffset(0, maxH + 16)
         end
-        self:Connect(leftLayout:GetPropertyChangedSignal("AbsoluteContentSize"), UpdateCanvas)
-        self:Connect(rightLayout:GetPropertyChangedSignal("AbsoluteContentSize"), UpdateCanvas)
+        Library:Connect(leftLayout:GetPropertyChangedSignal("AbsoluteContentSize"), UpdateCanvas)
+        Library:Connect(rightLayout:GetPropertyChangedSignal("AbsoluteContentSize"), UpdateCanvas)
 
         local Tab = {
             Name = tabName,
@@ -3228,7 +3228,7 @@ function Library:CreateWindow(cfg)
             return CreateTabboxContainer(rightCol, title)
         end
 
-        self:Connect(tabBtn.MouseEnter, function()
+        Library:Connect(tabBtn.MouseEnter, function()
             if Window.ActiveTab ~= Tab then
                 Library:Tween(tabBtn, TweenFast, {
                     BackgroundColor3 = Library.Theme.Element,
@@ -3238,14 +3238,14 @@ function Library:CreateWindow(cfg)
             end
         end)
 
-        self:Connect(tabBtn.MouseLeave, function()
+        Library:Connect(tabBtn.MouseLeave, function()
             if Window.ActiveTab ~= Tab then
                 Library:Tween(tabBtn, TweenFast, { BackgroundTransparency = 1 })
                 Library:Tween(tabLbl, TweenFast, { TextColor3 = Library.Theme.TextDim })
             end
         end)
 
-        self:Connect(tabBtn.MouseButton1Click, function()
+        Library:Connect(tabBtn.MouseButton1Click, function()
             Tab:Select()
         end)
 
