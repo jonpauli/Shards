@@ -1838,17 +1838,27 @@ function GroupboxMethods:AddDropdown(cfg)
     })
     Library:BindTheme(titleLbl, "TextColor3", "TextDim")
 
-    local boxBtn = Library:Create("TextButton", {
+    -- Single Unified Dropdown Box (expands downward as 1 whole bordered frame instead of 2 separate boxes)
+    local dropBox = Library:Create("Frame", {
+        Name = "DropBox",
         BackgroundColor3 = Library.Theme.Element,
-        AutoButtonColor = false,
         Position = UDim2.fromOffset(1, 17),
         Size = UDim2.new(1, -2, 0, 20),
-        Text = "",
-        ZIndex = 11,
+        ZIndex = 15,
         Parent = holder,
     })
-    Library:BindTheme(boxBtn, "BackgroundColor3", "Element")
-    local boxStroke = Library:ApplyCSBorder(boxBtn, "InnerBorder")
+    Library:BindTheme(dropBox, "BackgroundColor3", "Element")
+    local boxStroke = Library:ApplyCSBorder(dropBox, "InnerBorder")
+
+    -- Top clickable header area inside dropBox
+    local boxBtn = Library:Create("TextButton", {
+        BackgroundTransparency = 1,
+        AutoButtonColor = false,
+        Size = UDim2.new(1, 0, 0, 20),
+        Text = "",
+        ZIndex = 17,
+        Parent = dropBox,
+    })
 
     local valText = Library:Create("TextLabel", {
         BackgroundTransparency = 1,
@@ -1860,7 +1870,7 @@ function GroupboxMethods:AddDropdown(cfg)
         TextSize = 12,
         TextTruncate = Enum.TextTruncate.AtEnd,
         TextXAlignment = Enum.TextXAlignment.Left,
-        ZIndex = 12,
+        ZIndex = 18,
         Parent = boxBtn,
     })
     Library:BindTheme(valText, "TextColor3", "Text")
@@ -1872,45 +1882,31 @@ function GroupboxMethods:AddDropdown(cfg)
         Size = UDim2.fromOffset(12, 12),
         Image = Library:GetIcon("chevron-down"),
         ImageColor3 = Library.Theme.TextDim,
-        ZIndex = 12,
+        ZIndex = 18,
         Parent = boxBtn,
     })
     Library:BindTheme(chevron, "ImageColor3", "TextDim")
 
-    -- Connected Inline Dropdown Menu (expands smoothly directly out of the dropdown box as a single unified control)
+    -- Interior expandable list area inside the same dropBox (no second border)
     local dropMenu = Library:Create("Frame", {
         Name = "DropMenu_" .. name,
-        BackgroundColor3 = Library.Theme.Element,
-        Position = UDim2.fromOffset(1, 37),
-        Size = UDim2.new(1, -2, 0, 0),
+        BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(0, 20),
+        Size = UDim2.new(1, 0, 1, -20),
         ClipsDescendants = true,
         Visible = false,
-        ZIndex = 20,
-        Parent = holder,
+        ZIndex = 16,
+        Parent = dropBox,
     })
-    Library:BindTheme(dropMenu, "BackgroundColor3", "Element")
-    local dropStroke = Library:ApplyCSBorder(dropMenu, "InnerBorder")
 
-    -- Seamless Joint Bridge (hides the shared border line between the button and the expanded menu so both fuse into 1 box)
-    local seamBridge = Library:Create("Frame", {
-        Name = "SeamBridge",
-        BackgroundColor3 = Library.Theme.Element,
-        BorderSizePixel = 0,
-        Position = UDim2.fromOffset(2, 35),
-        Size = UDim2.new(1, -4, 0, 4),
-        Visible = false,
-        ZIndex = 22,
-        Parent = holder,
-    })
-    Library:BindTheme(seamBridge, "BackgroundColor3", "Element")
-
-    -- Subtle 1px inner divider between header and options
+    -- Subtle 1px inner divider inside the unified box between the header text and options
     local seamDivider = Library:Create("Frame", {
         BackgroundColor3 = Library.Theme.InnerBorder,
         BorderSizePixel = 0,
         Position = UDim2.fromOffset(6, 0),
         Size = UDim2.new(1, -12, 0, 1),
-        ZIndex = 23,
+        BackgroundTransparency = 0.25,
+        ZIndex = 17,
         Parent = dropMenu,
     })
     Library:BindTheme(seamDivider, "BackgroundColor3", "InnerBorder")
@@ -1918,7 +1914,7 @@ function GroupboxMethods:AddDropdown(cfg)
     local closeToken = 0
 
     local popupCtrl = {
-        Frames = { dropMenu, boxBtn },
+        Frames = { dropBox },
         IsOpen = function()
             return opened and dropMenu.Visible
         end,
@@ -1929,13 +1925,11 @@ function GroupboxMethods:AddDropdown(cfg)
             local token = closeToken
             Library:Tween(chevron, TweenFast, { Rotation = 0 })
             Library:Tween(boxStroke, TweenFast, { Color = Library.Theme.InnerBorder })
-            Library:Tween(dropStroke, TweenFast, { Color = Library.Theme.InnerBorder })
-            Library:Tween(dropMenu, TweenFast, { Size = UDim2.new(1, -2, 0, 0) })
+            Library:Tween(dropBox, TweenFast, { Size = UDim2.new(1, -2, 0, 20) })
             Library:Tween(holder, TweenFast, { Size = UDim2.new(1, 0, 0, 38) })
             task.delay(0.14, function()
                 if closeToken == token and not opened then
                     dropMenu.Visible = false
-                    seamBridge.Visible = false
                 end
             end)
         end
@@ -2148,11 +2142,11 @@ function GroupboxMethods:AddDropdown(cfg)
         scroll.CanvasSize = UDim2.fromOffset(0, contentH)
         local menuH = math.clamp(math.max(20, contentH) + listTopOffset + 4, listTopOffset + 22, 145)
         if opened then
-            Library:Tween(dropMenu, TweenFast, {
-                Size = UDim2.new(1, -2, 0, menuH)
+            Library:Tween(dropBox, TweenFast, {
+                Size = UDim2.new(1, -2, 0, 20 + menuH)
             })
             Library:Tween(holder, TweenFast, {
-                Size = UDim2.new(1, 0, 0, 37 + menuH)
+                Size = UDim2.new(1, 0, 0, 38 + menuH)
             })
         end
         return menuH
@@ -2229,12 +2223,9 @@ function GroupboxMethods:AddDropdown(cfg)
         opened = nextState
         if opened then
             closeToken += 1
-            dropMenu.Size = UDim2.new(1, -2, 0, 0)
             dropMenu.Visible = true
-            seamBridge.Visible = true
             Library:Tween(chevron, TweenFast, { Rotation = 180 })
             Library:Tween(boxStroke, TweenFast, { Color = Library.Theme.Accent })
-            Library:Tween(dropStroke, TweenFast, { Color = Library.Theme.Accent })
             RebuildItems()
         else
             popupCtrl.Close()
@@ -2247,6 +2238,17 @@ function GroupboxMethods:AddDropdown(cfg)
         end
     end)
 
+    Library:Connect(boxBtn.MouseEnter, function()
+        if not opened then
+            Library:Tween(boxStroke, TweenFast, { Color = Library.Theme.HighlightBorder })
+        end
+    end)
+
+    Library:Connect(boxBtn.MouseLeave, function()
+        if not opened then
+            Library:Tween(boxStroke, TweenFast, { Color = Library.Theme.InnerBorder })
+        end
+    end)
 
     UpdateDisplayText()
     RebuildItems()
