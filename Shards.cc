@@ -2894,8 +2894,7 @@ function Library:CreateWorldController()
                     local targetPos = currentSilentPos or (currentSilentPart and currentSilentPart.Parent and currentSilentPart.Position)
                     if F["Rage_Enabled"] == true and F["Rage_Silent"] == true and targetPos then
                         local method = getnamecallmethod()
-                        local hc = tonumber(F["Rage_Hitchance"]) or 100
-                        if selfObj == workspace and math.random(1, 100) <= hc then
+                        if selfObj == workspace then
                             if method == "FindPartOnRayWithIgnoreList"
                                 or method == "FindPartOnRayWithWhitelist"
                                 or method == "FindPartOnRay"
@@ -2903,19 +2902,22 @@ function Library:CreateWorldController()
                                 local args = { ... }
                                 if typeof(args[1]) == "Ray" then
                                     local origRay = args[1]
-                                    local origin = origRay.Origin
-                                    local vec = targetPos - origin
-                                    if vec.Magnitude > 0.05 then
-                                        local len = math.max(origRay.Direction.Magnitude, vec.Magnitude + 50, 999)
-                                        args[1] = Ray.new(origin, vec.Unit * len)
-                                        lastLocalShotTime = os.clock()
-                                        lastLocalShotTarget = currentSilentPlr
-                                        return oldNamecall(selfObj, unpack(args))
+                                    -- Only redirect weapon bullet rays (length >= 35), ignoring short footstep/camera popper rays
+                                    if origRay.Direction.Magnitude >= 35 then
+                                        local origin = origRay.Origin
+                                        local vec = targetPos - origin
+                                        if vec.Magnitude > 0.05 then
+                                            local len = math.max(origRay.Direction.Magnitude, vec.Magnitude + 50, 999)
+                                            args[1] = Ray.new(origin, vec.Unit * len)
+                                            lastLocalShotTime = os.clock()
+                                            lastLocalShotTarget = currentSilentPlr
+                                            return oldNamecall(selfObj, unpack(args))
+                                        end
                                     end
                                 end
                             elseif method == "Raycast" then
                                 local args = { ... }
-                                if typeof(args[1]) == "Vector3" and typeof(args[2]) == "Vector3" then
+                                if typeof(args[1]) == "Vector3" and typeof(args[2]) == "Vector3" and args[2].Magnitude >= 35 then
                                     local origin = args[1]
                                     local vec = targetPos - origin
                                     if vec.Magnitude > 0.05 then
@@ -4390,51 +4392,100 @@ function Library:CreateWorldController()
                     table.insert(baseIgnore, mapFolder.Clips)
                 end
 
+                local function ShouldPreferSafePoint(char, tel)
+                    local spConds = type(F["Rage_SafePoint"]) == "table" and F["Rage_SafePoint"] or nil
+                    if not spConds or next(spConds) == nil then return false end
+                    if spConds["Lethal HP"] and tel.HP <= math.max(45, tonumber(F["Rage_MinDmg"]) or 42) then
+                        return true
+                    end
+                    if spConds["High Fake Lag"] and tel.BreakingLC then
+                        return true
+                    end
+                    if spConds["Walking"] and tel.Speed >= 1 and tel.Speed <= 13 then
+                        return true
+                    end
+                    if spConds["In Air"] then
+                        local tHum = tel.Humanoid
+                        local vy = tel.RootPart and math.abs(tel.RootPart.AssemblyLinearVelocity.Y) or 0
+                        if (tHum and tHum.FloorMaterial == Enum.Material.Air) or vy > 4 then
+                            return true
+                        end
+                    end
+                    if spConds["Crouching"] and tel.Head and tel.RootPart then
+                        if (tel.Head.Position.Y - tel.RootPart.Position.Y) < 1.85 then
+                            return true
+                        end
+                    end
+                    return false
+                end
+
                 local function GetCandidateParts(char, tel)
                     local list = {}
                     local headPart = char:FindFirstChild("HeadHB") or char:FindFirstChild("FakeHead") or char:FindFirstChild("Head")
                     local chestPart = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso") or tel.RootPart
                     local pelvisPart = char:FindFirstChild("LowerTorso") or char:FindFirstChild("Torso") or tel.RootPart
-                    if forceBaim or (tel.HP <= (tonumber(F["Rage_MinDmg"]) or 42) and type(F["Rage_SafePoint"]) == "table" and F["Rage_SafePoint"]["Lethal HP"]) then
-                        if pelvisPart then table.insert(list, { Part = pelvisPart, Scale = bodyScale }) end
-                        if chestPart then table.insert(list, { Part = chestPart, Scale = bodyScale }) end
-                        return list
+                    local preferSafe = ShouldPreferSafePoint(char, tel)
+
+                    if forceBaim or preferSafe then
+                        local safeScale = preferSafe and (bodyScale * 0.5) or bodyScale
+                        if pelvisPart then table.insert(list, { Part = pelvisPart, Scale = safeScale, BaseDmg = 52 }) end
+                        if chestPart then table.insert(list, { Part = chestPart, Scale = safeScale, BaseDmg = 56 }) end
+                        if forceBaim then return list end
                     end
                     if hbMap and next(hbMap) ~= nil then
-                        if hbMap["Head"] and headPart then table.insert(list, { Part = headPart, Scale = headScale }) end
-                        if (hbMap["Upper Chest"] or hbMap["Neck"]) and chestPart then table.insert(list, { Part = chestPart, Scale = bodyScale }) end
-                        if hbMap["Pelvis"] and pelvisPart then table.insert(list, { Part = pelvisPart, Scale = bodyScale }) end
+                        if hbMap["Head"] and headPart then table.insert(list, { Part = headPart, Scale = headScale, BaseDmg = 108 }) end
+                        if (hbMap["Upper Chest"] or hbMap["Neck"]) and chestPart then table.insert(list, { Part = chestPart, Scale = bodyScale, BaseDmg = 56 }) end
+                        if hbMap["Pelvis"] and pelvisPart then table.insert(list, { Part = pelvisPart, Scale = bodyScale, BaseDmg = 52 }) end
                         if hbMap["Arms"] then
                             local rArm = char:FindFirstChild("RightUpperArm") or char:FindFirstChild("Right Arm")
                             local lArm = char:FindFirstChild("LeftUpperArm") or char:FindFirstChild("Left Arm")
-                            if rArm then table.insert(list, { Part = rArm, Scale = bodyScale }) end
-                            if lArm then table.insert(list, { Part = lArm, Scale = bodyScale }) end
+                            if rArm then table.insert(list, { Part = rArm, Scale = bodyScale, BaseDmg = 34 }) end
+                            if lArm then table.insert(list, { Part = lArm, Scale = bodyScale, BaseDmg = 34 }) end
                         end
                         if hbMap["Legs"] or hbMap["Feet"] then
                             local rLeg = char:FindFirstChild("RightUpperLeg") or char:FindFirstChild("Right Leg")
                             local lLeg = char:FindFirstChild("LeftUpperLeg") or char:FindFirstChild("Left Leg")
-                            if rLeg then table.insert(list, { Part = rLeg, Scale = bodyScale }) end
-                            if lLeg then table.insert(list, { Part = lLeg, Scale = bodyScale }) end
+                            if rLeg then table.insert(list, { Part = rLeg, Scale = bodyScale, BaseDmg = 32 }) end
+                            if lLeg then table.insert(list, { Part = lLeg, Scale = bodyScale, BaseDmg = 32 }) end
                         end
                     end
                     if #list == 0 then
-                        if headPart then table.insert(list, { Part = headPart, Scale = headScale }) end
-                        if chestPart then table.insert(list, { Part = chestPart, Scale = bodyScale }) end
-                        if pelvisPart then table.insert(list, { Part = pelvisPart, Scale = bodyScale }) end
+                        if headPart then table.insert(list, { Part = headPart, Scale = headScale, BaseDmg = 108 }) end
+                        if chestPart then table.insert(list, { Part = chestPart, Scale = bodyScale, BaseDmg = 56 }) end
+                        if pelvisPart then table.insert(list, { Part = pelvisPart, Scale = bodyScale, BaseDmg = 52 }) end
                     end
                     return list
                 end
 
-                local function CheckPointVisible(pt, char)
-                    if allowWall then return true end
-                    local dir = pt - cam.CFrame.Position
-                    local hit = RaycastPierceClips(cam.CFrame.Position, dir, baseIgnore)
-                    return (not hit) or hit.Instance:IsDescendantOf(char)
+                local minVisDmg = tonumber(F["Rage_MinDmg"]) or 42
+                local minWallDmg = tonumber(F["Rage_AutowallDmg"]) or 24
+
+                local function EvaluatePointDamage(pt, baseDmg, char, enemyHp)
+                    local origin = cam.CFrame.Position
+                    local dir = pt - origin
+                    local hit = RaycastPierceClips(origin, dir, baseIgnore)
+                    if not hit or hit.Instance:IsDescendantOf(char) then
+                        local req = math.min(minVisDmg, enemyHp)
+                        return baseDmg >= req, baseDmg
+                    end
+                    if not allowWall then
+                        return false, 0
+                    end
+                    -- Measure wall thickness via reverse ray from target back toward camera
+                    local revHit = RaycastPierceClips(pt, -dir, baseIgnore)
+                    local thickness = revHit and (revHit.Position - hit.Position).Magnitude or 16
+                    if thickness > 15 then
+                        return false, 0
+                    end
+                    local penDmg = math.floor(baseDmg * math.clamp(1 - (thickness / 18), 0.25, 0.9) + 0.5)
+                    local req = math.min(minWallDmg, enemyHp)
+                    return penDmg >= req, penDmg
                 end
 
                 local bestAimPart = nil
                 local bestAimPoint = nil
                 local bestPlr = nil
+                local bestDist3d = 50
                 local bestScore = math.huge
 
                 for _, plr in ipairs(Players:GetPlayers()) do
@@ -4446,6 +4497,7 @@ function Library:CreateWorldController()
                             for _, cand in ipairs(candidates) do
                                 local part = cand.Part
                                 local pScale = cand.Scale
+                                local bDmg = cand.BaseDmg or 60
                                 local toPart = part.Position - cam.CFrame.Position
                                 local dist3d = toPart.Magnitude
                                 if dist3d > 0.5 then
@@ -4462,8 +4514,11 @@ function Library:CreateWorldController()
 
                                     if inFov then
                                         local chosenPt = nil
-                                        if CheckPointVisible(part.Position, tel.Character) then
+                                        local chosenDmg = 0
+                                        local okCenter, dmgCenter = EvaluatePointDamage(part.Position, bDmg, tel.Character, tel.HP)
+                                        if okCenter then
                                             chosenPt = part.Position
+                                            chosenDmg = dmgCenter
                                         elseif rageActive and pScale > 0 then
                                             -- Multipoint edge scan (left / right / top of hitbox)
                                             local sz = part.Size
@@ -4473,8 +4528,10 @@ function Library:CreateWorldController()
                                                 part.CFrame.UpVector * (sz.Y * pScale),
                                             }
                                             for _, off in ipairs(offsets) do
-                                                if CheckPointVisible(part.Position + off, tel.Character) then
+                                                local okMp, dmgMp = EvaluatePointDamage(part.Position + off, bDmg, tel.Character, tel.HP)
+                                                if okMp then
                                                     chosenPt = part.Position + off
+                                                    chosenDmg = dmgMp
                                                     break
                                                 end
                                             end
@@ -4484,11 +4541,11 @@ function Library:CreateWorldController()
                                             local score = fovDistPx
                                             if rageActive then
                                                 if priority == "Lowest HP" then
-                                                    score = tel.HP
+                                                    score = tel.HP - chosenDmg * 0.2
                                                 elseif priority == "Shortest Distance" then
                                                     score = dist3d
                                                 elseif priority == "Highest Threat" then
-                                                    score = dist3d * 0.5 + tel.HP
+                                                    score = dist3d * 0.45 + tel.HP - chosenDmg * 0.25
                                                 else
                                                     score = angDeg
                                                 end
@@ -4498,8 +4555,9 @@ function Library:CreateWorldController()
                                                 bestAimPart = part
                                                 bestAimPoint = chosenPt
                                                 bestPlr = plr
+                                                bestDist3d = dist3d
                                             end
-                                            break -- found visible hitbox on this player in priority order
+                                            break -- found valid hitbox on this player in priority order
                                         end
                                     end
                                 end
@@ -4519,16 +4577,29 @@ function Library:CreateWorldController()
                     end
                     local targetCF = CFrame.lookAt(cam.CFrame.Position, aimPos)
                     if rageActive then
-                        if F["Rage_QuickStop"] and myHrp and myHum and myHum.FloorMaterial ~= Enum.Material.Air then
+                        local mySpd = 0
+                        local grounded = (not myHum) or (myHum.FloorMaterial ~= Enum.Material.Air)
+                        if myHrp then
                             local v = myHrp.AssemblyLinearVelocity
-                            myHrp.AssemblyLinearVelocity = Vector3.new(v.X * 0.12, v.Y, v.Z * 0.12)
+                            mySpd = Vector2.new(v.X, v.Z).Magnitude
+                            if F["Rage_QuickStop"] and grounded and mySpd > 1.5 then
+                                myHrp.AssemblyLinearVelocity = Vector3.new(v.X * 0.12, v.Y, v.Z * 0.12)
+                                mySpd = mySpd * 0.12
+                            end
                         end
+
+                        -- Calculate live Hitchance (0..100) from velocity, airborne state, distance & recoil recovery
+                        local distPenalty = math.clamp((bestDist3d - 35) * 0.14, 0, 22)
+                        local movePenalty = grounded and math.clamp(mySpd * 1.65, 0, 38) or 35
+                        local liveHc = math.clamp(100 - distPenalty - movePenalty, 15, 100)
+                        local reqHc = tonumber(F["Rage_Hitchance"]) or 68
+
                         -- Only rotate camera if Silent Aim is off (or if executor lacks hookmetamethod)
                         if F["Rage_Silent"] ~= true or not hasSilentHook then
                             cam.CFrame = (F["Rage_Silent"] == true) and targetCF or cam.CFrame:Lerp(targetCF, 0.92)
                         end
                         local fireCooldown = (F["Rage_DT"] == true) and 0.05 or 0.12
-                        if F["Rage_AutoFire"] and (os.clock() - lastRageFire) >= fireCooldown then
+                        if F["Rage_AutoFire"] and liveHc >= reqHc and (os.clock() - lastRageFire) >= fireCooldown then
                             lastRageFire = os.clock()
                             FireWeapon(myChar, mPos, bestPlr)
                             SpawnTracer(aimPos)
