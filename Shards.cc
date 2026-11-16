@@ -41,11 +41,41 @@ local Library = {
     FontBold = Enum.Font.Arcade,
     FontScale = 0.85,
     TextStroke = true,
+    FontOrder = {
+        "Pixelated (Arcade 0.85)",
+        "Pixelated Micro (Arcade 0.75)",
+        "Pixelated Crisp (Silkscreen)",
+        "Pixelated 8-Bit (PressStart2P)",
+        "Skeet Classic (Code / Inconsolata)",
+        "CS2 Console (RobotoMono)",
+        "Neverlose Clean (Ubuntu)",
+        "Gamesense Tahoma (Legacy)",
+        "Tactical Condensed (RobotoCondensed)",
+        "Modern Tech (Michroma)",
+        "Sharp Sans (Arial /ArialBold)",
+        "Heavy Industrial (Sarpanch)",
+        "Military Stencil (Jura)",
+        "Sci-Fi HUD (Orbitron / Eurostile)",
+        "Minimalist (Gotham / GothamBold)",
+        "Terminal DOS (Courier /Monospace)",
+    },
     Fonts = {
-        ["Pixelated (CS Bitmap)"] = { Font = Enum.Font.Arcade,     Bold = Enum.Font.Arcade,     Scale = 0.85 },
-        ["CS2 Crisp (RobotoMono)"] = { Font = Enum.Font.RobotoMono, Bold = Enum.Font.RobotoMono, Scale = 1.00 },
-        ["Skeet Mono (Code)"]      = { Font = Enum.Font.Code,       Bold = Enum.Font.GothamBold, Scale = 1.00 },
-        ["Classic (Tahoma)"]       = { Font = Enum.Font.Legacy,     Bold = Enum.Font.Legacy,     Scale = 0.92 },
+        ["Pixelated (Arcade 0.85)"]           = { Font = Enum.Font.Arcade,          Bold = Enum.Font.Arcade,          Scale = 0.85 },
+        ["Pixelated Micro (Arcade 0.75)"]     = { Font = Enum.Font.Arcade,          Bold = Enum.Font.Arcade,          Scale = 0.75 },
+        ["Pixelated Crisp (Silkscreen)"]      = { Family = "rbxasset://fonts/families/Silkscreen.json",   Scale = 0.88, Fallback = Enum.Font.Arcade },
+        ["Pixelated 8-Bit (PressStart2P)"]    = { Family = "rbxasset://fonts/families/PressStart2P.json", Scale = 0.72, Fallback = Enum.Font.Arcade },
+        ["Skeet Classic (Code / Inconsolata)"]= { Font = Enum.Font.Code,            Bold = Enum.Font.GothamBold,      Scale = 1.00 },
+        ["CS2 Console (RobotoMono)"]          = { Font = Enum.Font.RobotoMono,      Bold = Enum.Font.RobotoMono,      Scale = 1.00 },
+        ["Neverlose Clean (Ubuntu)"]          = { Font = Enum.Font.Ubuntu,          Bold = Enum.Font.Ubuntu,          Scale = 0.96 },
+        ["Gamesense Tahoma (Legacy)"]         = { Font = Enum.Font.Legacy,          Bold = Enum.Font.Legacy,          Scale = 0.90 },
+        ["Tactical Condensed (RobotoCondensed)"] = { Font = Enum.Font.RobotoCondensed, Bold = Enum.Font.RobotoCondensed, Scale = 1.02 },
+        ["Modern Tech (Michroma)"]            = { Font = Enum.Font.Michroma,        Bold = Enum.Font.Michroma,        Scale = 0.82 },
+        ["Sharp Sans (Arial /ArialBold)"]     = { Font = Enum.Font.Arial,           Bold = Enum.Font.ArialBold,       Scale = 0.95 },
+        ["Heavy Industrial (Sarpanch)"]       = { Font = Enum.Font.Sarpanch,        Bold = Enum.Font.Sarpanch,        Scale = 1.00 },
+        ["Military Stencil (Jura)"]           = { Font = Enum.Font.Jura,            Bold = Enum.Font.Jura,            Scale = 1.02 },
+        ["Sci-Fi HUD (Orbitron / Eurostile)"] = { Font = Enum.Font.SciFi,           Bold = Enum.Font.SciFi,           Scale = 0.95 },
+        ["Minimalist (Gotham / GothamBold)"]  = { Font = Enum.Font.Gotham,          Bold = Enum.Font.GothamBold,      Scale = 0.95 },
+        ["Terminal DOS (Courier /Monospace)"] = { Family = "rbxasset://fonts/families/Inconsolata.json",  Scale = 1.00, Fallback = Enum.Font.Code },
     },
     Theme = {
         Background       = Color3.fromRGB(11, 11, 14),
@@ -197,12 +227,16 @@ function Library:Create(className, props, children)
 
     if isText then
         local isBold = (rawFont == Enum.Font.GothamBold)
-        inst.Font = isBold and self.FontBold or self.Font
-        inst.TextSize = math.max(8, math.floor(rawSize * self.FontScale + 0.5))
-        if self.TextStroke and (not props or props.TextStrokeTransparency == nil) then
-            inst.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-            inst.TextStrokeTransparency = 0.18
+        if self.FontFace then
+            pcall(function()
+                inst.FontFace = isBold and (self.FontFaceBold or self.FontFace) or self.FontFace
+            end)
+        else
+            inst.Font = isBold and self.FontBold or self.Font
         end
+        inst.TextSize = math.max(8, math.floor(rawSize * self.FontScale + 0.5))
+        inst.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        inst.TextStrokeTransparency = self.TextStroke and 0.18 or 1
         table.insert(self.TextObjects, {
             Instance = inst,
             BaseSize = rawSize,
@@ -224,17 +258,22 @@ function Library:GetTextBounds(text, baseSize, maxVec)
     return ok and res or Vector2.new(#tostring(text or "") * 7, scaledSize + 2)
 end
 
-function Library:SetFontPreset(presetName)
-    local preset = self.Fonts[presetName]
-    if not preset then return end
-    self.Font = preset.Font
-    self.FontBold = preset.Bold
-    self.FontScale = preset.Scale
+function Library:RefreshAllText()
     for i = #self.TextObjects, 1, -1 do
         local entry = self.TextObjects[i]
         if entry.Instance and entry.Instance.Parent then
-            entry.Instance.Font = entry.IsBold and self.FontBold or self.Font
+            if self.FontFace then
+                local ok = pcall(function()
+                    entry.Instance.FontFace = entry.IsBold and (self.FontFaceBold or self.FontFace) or self.FontFace
+                end)
+                if not ok then
+                    entry.Instance.Font = entry.IsBold and self.FontBold or self.Font
+                end
+            else
+                entry.Instance.Font = entry.IsBold and self.FontBold or self.Font
+            end
             entry.Instance.TextSize = math.max(8, math.floor(entry.BaseSize * self.FontScale + 0.5))
+            entry.Instance.TextStrokeTransparency = self.TextStroke and 0.18 or 1
         else
             table.remove(self.TextObjects, i)
         end
@@ -242,6 +281,38 @@ function Library:SetFontPreset(presetName)
     for _, fn in ipairs(self.LayoutRefreshers) do
         pcall(fn)
     end
+end
+
+function Library:SetFontPreset(presetName)
+    local preset = self.Fonts[presetName]
+    if not preset then return end
+    self.CurrentFontPreset = presetName
+    self.FontScale = preset.Scale or 1.00
+    if preset.Family and type(Font) == "table" and Font.new then
+        local ok, ff = pcall(function()
+            return Font.new(preset.Family, Enum.FontWeight.Regular, Enum.FontStyle.Normal)
+        end)
+        local okB, ffb = pcall(function()
+            return Font.new(preset.Family, Enum.FontWeight.Bold, Enum.FontStyle.Normal)
+        end)
+        if ok and ff then
+            self.FontFace = ff
+            self.FontFaceBold = (okB and ffb) or ff
+            self.Font = preset.Fallback or Enum.Font.Code
+            self.FontBold = preset.Fallback or Enum.Font.Code
+        else
+            self.FontFace = nil
+            self.FontFaceBold = nil
+            self.Font = preset.Fallback or Enum.Font.Arcade
+            self.FontBold = preset.Fallback or Enum.Font.Arcade
+        end
+    else
+        self.FontFace = nil
+        self.FontFaceBold = nil
+        self.Font = preset.Font or Enum.Font.Code
+        self.FontBold = preset.Bold or self.Font
+    end
+    self:RefreshAllText()
 end
 
 function Library:BindTheme(instance, property, themeKey)
@@ -3615,14 +3686,44 @@ function Library:BuildConfigTab(tab)
         end
     })
 
+    local fontScaleSlider
     themeGroup:AddDropdown({
         Name = "UI Font Style",
         Flag = "UI_FontPreset",
-        Values = { "Pixelated (CS Bitmap)", "CS2 Crisp (RobotoMono)", "Skeet Mono (Code)", "Classic (Tahoma)" },
-        Default = "Pixelated (CS Bitmap)",
+        Searchable = true,
+        Values = self.FontOrder,
+        Default = "Pixelated (Arcade 0.85)",
         Callback = function(choice)
             self:SetFontPreset(choice)
+            if fontScaleSlider then
+                fontScaleSlider:Set(self.FontScale)
+            end
             if self.KeybindList then self.KeybindList:Refresh() end
+        end
+    })
+
+    fontScaleSlider = themeGroup:AddSlider({
+        Name = "Font Scale Fine-Tune",
+        Flag = "UI_FontScale",
+        Min = 0.65,
+        Max = 1.25,
+        Default = self.FontScale,
+        Rounding = 2,
+        Suffix = "x",
+        Callback = function(sc)
+            self.FontScale = sc
+            self:RefreshAllText()
+            if self.KeybindList then self.KeybindList:Refresh() end
+        end
+    })
+
+    themeGroup:AddToggle({
+        Name = "1px Black Text Outline",
+        Flag = "UI_TextStroke",
+        Default = self.TextStroke,
+        Callback = function(state)
+            self.TextStroke = state
+            self:RefreshAllText()
         end
     })
 
