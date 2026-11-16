@@ -2873,8 +2873,54 @@ function Library:CreateWorldController()
     local lastLocalShotTime = 0
     local lastLocalShotTarget = nil
     local lastTracerSpawnTime = 0
+    local currentSilentPart = nil
+    local currentSilentPlr = nil
+    local hasSilentHook = false
     local vimService = nil
     pcall(function() vimService = game:GetService("VirtualInputManager") end)
+
+    -- Hook workspace raycast methods when hookmetamethod is available for true camera-free Silent Aim
+    pcall(function()
+        if hookmetamethod and getnamecallmethod then
+            local oldNamecall
+            oldNamecall = hookmetamethod(game, "__namecall", function(selfObj, ...)
+                local method = getnamecallmethod()
+                if not Library.Unloaded
+                    and selfObj == workspace
+                    and (not checkcaller or not checkcaller())
+                    and Library.Flags["Rage_Enabled"] == true
+                    and Library.Flags["Rage_Silent"] == true
+                    and currentSilentPart
+                    and currentSilentPart.Parent
+                then
+                    local hc = tonumber(Library.Flags["Rage_Hitchance"]) or 100
+                    if math.random(1, 100) <= hc then
+                        local args = { ... }
+                        if (method == "FindPartOnRayWithIgnoreList" or method == "FindPartOnRayWithWhitelist" or method == "FindPartOnRay")
+                            and typeof(args[1]) == "Ray"
+                        then
+                            local origRay = args[1]
+                            local origin = origRay.Origin
+                            local dir = (currentSilentPart.Position - origin).Unit * math.max(origRay.Direction.Magnitude, 999)
+                            args[1] = Ray.new(origin, dir)
+                            lastLocalShotTime = os.clock()
+                            lastLocalShotTarget = currentSilentPlr
+                            return oldNamecall(selfObj, unpack(args))
+                        elseif method == "Raycast" and typeof(args[1]) == "Vector3" and typeof(args[2]) == "Vector3" then
+                            local origin = args[1]
+                            local dir = (currentSilentPart.Position - origin).Unit * math.max(args[2].Magnitude, 999)
+                            args[2] = dir
+                            lastLocalShotTime = os.clock()
+                            lastLocalShotTarget = currentSilentPlr
+                            return oldNamecall(selfObj, unpack(args))
+                        end
+                    end
+                end
+                return oldNamecall(selfObj, ...)
+            end)
+            hasSilentHook = true
+        end
+    end)
 
     local function GetMuzzleOrigin(cam)
         local myChar = LocalPlayer and LocalPlayer.Character
@@ -4358,6 +4404,9 @@ function Library:CreateWorldController()
                     end
                 end
 
+                currentSilentPart = (rageActive and F["Rage_Silent"] == true) and bestAimPart or nil
+                currentSilentPlr = (rageActive and F["Rage_Silent"] == true) and bestPlr or nil
+
                 if bestAimPart then
                     local aimPos = bestAimPart.Position
                     if legitActive and F["Legit_RCS"] then
@@ -4369,7 +4418,10 @@ function Library:CreateWorldController()
                             local v = myHrp.AssemblyLinearVelocity
                             myHrp.AssemblyLinearVelocity = Vector3.new(v.X * 0.12, v.Y, v.Z * 0.12)
                         end
-                        cam.CFrame = (F["Rage_Silent"] == true) and targetCF or cam.CFrame:Lerp(targetCF, 0.92)
+                        -- Only rotate camera if Silent Aim is off (or if executor lacks hookmetamethod)
+                        if F["Rage_Silent"] ~= true or not hasSilentHook then
+                            cam.CFrame = (F["Rage_Silent"] == true) and targetCF or cam.CFrame:Lerp(targetCF, 0.92)
+                        end
                         local fireCooldown = (F["Rage_DT"] == true) and 0.06 or 0.14
                         if F["Rage_AutoFire"] and (os.clock() - lastRageFire) >= fireCooldown then
                             lastRageFire = os.clock()
@@ -4382,6 +4434,9 @@ function Library:CreateWorldController()
                         cam.CFrame = cam.CFrame:Lerp(targetCF, alpha)
                     end
                 end
+            else
+                currentSilentPart = nil
+                currentSilentPlr = nil
             end
 
             if trigActive then
