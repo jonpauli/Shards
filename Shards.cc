@@ -2868,7 +2868,9 @@ function Library:CreateWorldController()
     local aaApplied = false
     local jitterFlip = false
     local lastTrigFire = 0
+    local lastRageFire = 0
     local noclipParts = {}
+    local tpTransParts = {}
     local disabledPostEffects = {}
     local suppressedSmokes = {}
     local suppressedGuiOverlays = {}
@@ -3586,43 +3588,22 @@ function Library:CreateWorldController()
             end
         end
 
-        -- Camera FOV & Thirdperson (Aspect Ratio Stretch runs in BindToRenderStep after Camera update)
-        if F["World_FOV_Enabled"] then
-            if not fovApplied then
-                origCamFov = cam.FieldOfView
-                fovApplied = true
-            end
-            cam.FieldOfView = math.clamp(tonumber(F["World_FOV"]) or 105, 40, 135)
-        elseif fovApplied then
-            fovApplied = false
-            cam.FieldOfView = origCamFov
-        end
-
-        if LocalPlayer then
-            if F["World_TP"] then
-                if not tpApplied then
-                    origMinZoom = LocalPlayer.CameraMinZoomDistance
-                    origMaxZoom = LocalPlayer.CameraMaxZoomDistance
-                    tpApplied = true
-                end
-                local tpDist = math.clamp((tonumber(F["World_TPDist"]) or 115) * 0.2, 6, 120)
-                LocalPlayer.CameraMaxZoomDistance = tpDist
-                LocalPlayer.CameraMinZoomDistance = tpDist
-            elseif tpApplied then
-                tpApplied = false
-                LocalPlayer.CameraMinZoomDistance = origMinZoom
-                LocalPlayer.CameraMaxZoomDistance = origMaxZoom
-            end
-        end
-
         -- 3) LocalPlayer Movement Controller (WalkSpeed, JumpPower, Bhop, Air Strafe, Fast Stop)
         local myChar = LocalPlayer and LocalPlayer.Character
         local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
         local myHrp = myChar and (myChar:FindFirstChild("HumanoidRootPart") or myChar:FindFirstChild("Torso") or myChar.PrimaryPart)
         if myHum and myHrp then
+            local moveDir = myHum.MoveDirection
+            local onGround = (myHum.FloorMaterial ~= Enum.Material.Air)
+
             if F["Misc_Speed_Enabled"] then
                 speedApplied = true
-                myHum.WalkSpeed = math.clamp(tonumber(F["Misc_Speed"]) or 28, 16, 150)
+                local targetSpd = math.clamp(tonumber(F["Misc_Speed"]) or 28, 16, 150)
+                myHum.WalkSpeed = targetSpd
+                if moveDir.Magnitude > 0.05 then
+                    local vel = myHrp.AssemblyLinearVelocity
+                    myHrp.AssemblyLinearVelocity = Vector3.new(moveDir.X * targetSpd, vel.Y, moveDir.Z * targetSpd)
+                end
             elseif speedApplied then
                 speedApplied = false
                 myHum.WalkSpeed = 16
@@ -3630,40 +3611,39 @@ function Library:CreateWorldController()
 
             if F["Misc_Jump_Enabled"] then
                 jumpApplied = true
+                local targetJmp = math.clamp(tonumber(F["Misc_Jump"]) or 65, 50, 200)
                 myHum.UseJumpPower = true
-                myHum.JumpPower = math.clamp(tonumber(F["Misc_Jump"]) or 65, 50, 200)
+                myHum.JumpPower = targetJmp
             elseif jumpApplied then
                 jumpApplied = false
                 myHum.JumpPower = 50
             end
 
-            local moveDir = myHum.MoveDirection
-            local onGround = (myHum.FloorMaterial ~= Enum.Material.Air)
-
-            if F["Misc_Bhop"] and moveDir.Magnitude > 0.05 then
+            local spaceHeld = UserInputService:IsKeyDown(Enum.KeyCode.Space) and (UserInputService:GetFocusedTextBox() == nil)
+            if F["Misc_Bhop"] and spaceHeld then
                 if onGround then
                     myHum.Jump = true
-                else
+                    myHum:ChangeState(Enum.HumanoidStateType.Jumping)
+                elseif moveDir.Magnitude > 0.05 then
                     local boost = math.clamp(tonumber(F["Misc_BhopSpeed"]) or 24, 0, 120)
-                    if boost > 0 then
-                        local vel = myHrp.AssemblyLinearVelocity
-                        myHrp.AssemblyLinearVelocity = Vector3.new(
-                            vel.X + moveDir.X * boost * dt * 2.4,
-                            vel.Y,
-                            vel.Z + moveDir.Z * boost * dt * 2.4
-                        )
-                    end
+                    local vel = myHrp.AssemblyLinearVelocity
+                    local targetAirSpd = math.max(Vector2.new(vel.X, vel.Z).Magnitude, 18 + boost * 0.65)
+                    myHrp.AssemblyLinearVelocity = Vector3.new(
+                        moveDir.X * targetAirSpd,
+                        vel.Y,
+                        moveDir.Z * targetAirSpd
+                    )
                 end
             end
 
             if F["Misc_Strafe"] and not onGround and moveDir.Magnitude > 0.05 then
                 local vel = myHrp.AssemblyLinearVelocity
-                local horizSpeed = math.max(18, Vector2.new(vel.X, vel.Z).Magnitude)
+                local horizSpeed = math.max(20, Vector2.new(vel.X, vel.Z).Magnitude)
                 local targetVel = moveDir.Unit * horizSpeed
                 myHrp.AssemblyLinearVelocity = Vector3.new(
-                    vel.X + (targetVel.X - vel.X) * math.clamp(dt * 9, 0, 1),
+                    vel.X + (targetVel.X - vel.X) * math.clamp(dt * 10, 0, 1),
                     vel.Y,
-                    vel.Z + (targetVel.Z - vel.Z) * math.clamp(dt * 9, 0, 1)
+                    vel.Z + (targetVel.Z - vel.Z) * math.clamp(dt * 10, 0, 1)
                 )
             end
 
@@ -3722,141 +3702,11 @@ function Library:CreateWorldController()
             end
         end
 
-        -- 3.5) Combat Target Acquisition, Raycast Visibility, Aim Assist & Triggerbot
-        local rageActive = (F["Rage_Enabled"] == true) and (not self.ActiveKeybinds["Rage_Key"] or self.ActiveKeybinds["Rage_Key"].Active)
-        local legitActive = (F["Legit_Enable"] == true) and (not self.ActiveKeybinds["Legit_Key"] or self.ActiveKeybinds["Legit_Key"].Active)
-        local trigActive = (F["Trig_Enable"] == true) and (not self.ActiveKeybinds["Trig_Key"] or self.ActiveKeybinds["Trig_Key"].Active)
-
-        if rageActive or legitActive then
-            local fovLimitPx = legitActive and ((tonumber(F["Legit_FOV"]) or 4.5) * 12) or ((tonumber(F["Rage_FOV"]) or 180) * 1.6)
-            local dzPx = legitActive and ((tonumber(F["Legit_Deadzone"]) or 0) * 8) or 0
-            local priority = F["Rage_Priority"] or "FOV Closest"
-            local forceBaim = (F["Rage_ForceBaim"] == true) and (not self.ActiveKeybinds["Rage_BaimKey"] or self.ActiveKeybinds["Rage_BaimKey"].Active)
-            local allowWall = rageActive and (F["Rage_Autowall"] == true)
-            local hbMap = type(F["Rage_Hitboxes"]) == "table" and F["Rage_Hitboxes"] or nil
-
-            local rayParams = RaycastParams.new()
-            rayParams.FilterType = Enum.RaycastFilterType.Exclude
-            local ignoreList = { cam }
-            if myChar then table.insert(ignoreList, myChar) end
-            local rayIgnore = workspace:FindFirstChild("Ray_Ignore")
-            if rayIgnore then table.insert(ignoreList, rayIgnore) end
-            rayParams.FilterDescendantsInstances = ignoreList
-
-            local function ResolveTargetPart(char, tel)
-                if forceBaim then
-                    return char:FindFirstChild("LowerTorso") or char:FindFirstChild("Torso") or tel.RootPart
-                end
-                if hbMap and next(hbMap) ~= nil then
-                    if hbMap["Head"] and char:FindFirstChild("Head") then return char.Head end
-                    if (hbMap["Upper Chest"] or hbMap["Neck"]) and (char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")) then
-                        return char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
-                    end
-                    if hbMap["Pelvis"] and (char:FindFirstChild("LowerTorso") or tel.RootPart) then
-                        return char:FindFirstChild("LowerTorso") or tel.RootPart
-                    end
-                    if hbMap["Arms"] and (char:FindFirstChild("RightUpperArm") or char:FindFirstChild("Right Arm")) then
-                        return char:FindFirstChild("RightUpperArm") or char:FindFirstChild("Right Arm")
-                    end
-                    if (hbMap["Legs"] or hbMap["Feet"]) and (char:FindFirstChild("RightUpperLeg") or char:FindFirstChild("Right Leg")) then
-                        return char:FindFirstChild("RightUpperLeg") or char:FindFirstChild("Right Leg")
-                    end
-                end
-                return tel.Head or tel.RootPart
-            end
-
-            local bestAimPart = nil
-            local bestScore = math.huge
-            for _, plr in ipairs(Players:GetPlayers()) do
-                if plr ~= LocalPlayer then
-                    local isWhitelisted = (F["Misc_Whitelist"] == true) and (F["Misc_PlayerTarget"] == plr.Name)
-                    local tel = self:GetPlayerTelemetry(plr)
-                    if not isWhitelisted and tel and tel.Alive and (not F["ESP_TeamCheck"] or not tel.IsTeammate) then
-                        local part = ResolveTargetPart(tel.Character, tel)
-                        if part then
-                            local sp, onScr = cam:WorldToViewportPoint(part.Position)
-                            if (onScr or rageActive) and sp.Z > 0 then
-                                local fovDist = (Vector2.new(sp.X, sp.Y) - mPos).Magnitude
-                                if fovDist <= fovLimitPx and fovDist >= dzPx then
-                                    local visible = allowWall
-                                    if not visible then
-                                        local dir = part.Position - cam.CFrame.Position
-                                        local hit = workspace:Raycast(cam.CFrame.Position, dir, rayParams)
-                                        visible = (not hit) or hit.Instance:IsDescendantOf(tel.Character)
-                                    end
-                                    if visible then
-                                        local score = fovDist
-                                        if rageActive then
-                                            if priority == "Lowest HP" then
-                                                score = tel.HP
-                                            elseif priority == "Shortest Distance" then
-                                                score = (part.Position - cam.CFrame.Position).Magnitude
-                                            elseif priority == "Highest Threat" then
-                                                score = (part.Position - cam.CFrame.Position).Magnitude * 0.5 + tel.HP
-                                            end
-                                        end
-                                        if score < bestScore then
-                                            bestScore = score
-                                            bestAimPart = part
-                                        end
-                                    end
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-
-            if bestAimPart then
-                local aimPos = bestAimPart.Position
-                if legitActive and F["Legit_RCS"] then
-                    aimPos = aimPos - Vector3.new(0, 0.18, 0)
-                end
-                local targetCF = CFrame.lookAt(cam.CFrame.Position, aimPos)
-                if rageActive then
-                    if F["Rage_QuickStop"] and myHrp and myHum and myHum.FloorMaterial ~= Enum.Material.Air then
-                        local v = myHrp.AssemblyLinearVelocity
-                        myHrp.AssemblyLinearVelocity = Vector3.new(v.X * 0.12, v.Y, v.Z * 0.12)
-                    end
-                    if F["Rage_Silent"] ~= true then
-                        cam.CFrame = cam.CFrame:Lerp(targetCF, 0.85)
-                    end
-                else
-                    local smooth = math.max(1, tonumber(F["Legit_Smooth"]) or 6.5)
-                    local alpha = math.clamp((1 / smooth) * (dt * 60), 0.03, 1)
-                    cam.CFrame = cam.CFrame:Lerp(targetCF, alpha)
-                end
-            end
-        end
-
-        if trigActive and (os.clock() - lastTrigFire) >= ((tonumber(F["Trig_Delay"]) or 35) / 1000) then
-            local rayParams = RaycastParams.new()
-            rayParams.FilterType = Enum.RaycastFilterType.Exclude
-            local ignoreList = { cam }
-            if myChar then table.insert(ignoreList, myChar) end
-            rayParams.FilterDescendantsInstances = ignoreList
-            local hit = workspace:Raycast(cam.CFrame.Position, cam.CFrame.LookVector * 600, rayParams)
-            if hit and hit.Instance then
-                for _, plr in ipairs(Players:GetPlayers()) do
-                    if plr ~= LocalPlayer and plr.Character and hit.Instance:IsDescendantOf(plr.Character) then
-                        local tel = self:GetPlayerTelemetry(plr)
-                        if tel and tel.Alive and (not F["ESP_TeamCheck"] or not tel.IsTeammate) then
-                            lastTrigFire = os.clock()
-                            local eqTool = myChar and myChar:FindFirstChildOfClass("Tool")
-                            if eqTool then
-                                pcall(function() eqTool:Activate() end)
-                            end
-                            break
-                        end
-                    end
-                end
-            end
-        end
-
         -- 4) Counter Blox & Universal 2D Player Overlays, Skeleton, Backtrack Ghost, Tracers, Off-Screen Arrows & Chams
+        local hasFlagESP = type(F["ESP_Flags"]) == "table" and next(F["ESP_Flags"]) ~= nil
         local anyESP = F["ESP_Box"] or F["ESP_Name"] or F["ESP_Health"] or F["ESP_Weapon"] or F["ESP_Glow"]
             or F["ESP_Tracers"] or F["ESP_OOF"] or F["ESP_HeadDot"] or F["ESP_Skeleton"] or F["ESP_Backtrack"]
-            or F["Chams_Vis"] or F["Chams_XQZ"]
+            or F["Chams_Vis"] or F["Chams_XQZ"] or hasFlagESP
         local maxDist = tonumber(F["ESP_MaxDist"]) or 2000
         local teamCheck = (F["ESP_TeamCheck"] == true)
         local boxStyle = F["ESP_BoxStyle"] or "Full 2D"
@@ -4212,15 +4062,214 @@ function Library:CreateWorldController()
         end
     end)
 
-    -- Bind Aspect Ratio Stretch at Camera + 1 priority so Roblox's camera controller never overwrites it
+    -- Bind Camera Overrides (Aimbot,FOV, Thirdperson, Aspect Ratio) at Camera + 1 priority so Roblox/CB camera scripts never overwrite them
     pcall(function()
-        RunService:BindToRenderStep("ShardsAspectStretch", Enum.RenderPriority.Camera.Value + 1, function()
-            if self.Unloaded or not self.Flags["World_Aspect_Enabled"] then return end
+        RunService:BindToRenderStep("ShardsAspectStretch", Enum.RenderPriority.Camera.Value + 1, function(dt)
+            if self.Unloaded then return end
+            local F = self.Flags
             local cam = workspace.CurrentCamera
             if not cam then return end
-            local ratio = math.clamp(tonumber(self.Flags["World_Aspect"]) or 0.78, 0.45, 1.5)
-            local x, y, z, r00, r01, r02, r10, r11, r12, r20, r21, r22 = cam.CFrame:GetComponents()
-            cam.CFrame = CFrame.new(x, y, z, r00, r01 * ratio, r02, r10, r11 * ratio, r12, r20, r21 * ratio, r22)
+            local mPos = UserInputService:GetMouseLocation()
+            local myChar = LocalPlayer and LocalPlayer.Character
+            local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
+            local myHrp = myChar and (myChar:FindFirstChild("HumanoidRootPart") or myChar:FindFirstChild("Torso") or myChar.PrimaryPart)
+
+            -- 1) Camera FOV Override
+            if F["World_FOV_Enabled"] then
+                if not fovApplied then
+                    origCamFov = cam.FieldOfView
+                    fovApplied = true
+                end
+                cam.FieldOfView = math.clamp(tonumber(F["World_FOV"]) or 105, 40, 135)
+            elseif fovApplied then
+                fovApplied = false
+                cam.FieldOfView = origCamFov
+            end
+
+            -- 2) Combat Target Acquisition, Aimbot (Rage / Legit), AutoFire & Triggerbot
+            local kbRage = self.Options["Rage_Key"]
+            local kbLegit = self.Options["Legit_Key"]
+            local kbTrig = self.Options["Trig_Key"]
+            local kbBaim = self.Options["Rage_BaimKey"]
+
+            local rageActive = (F["Rage_Enabled"] == true) and (not kbRage or kbRage.Mode == "Always" or kbRage.Active)
+            local legitActive = (F["Legit_Enable"] == true) and (not kbLegit or kbLegit.Mode == "Always" or kbLegit.Active)
+            local trigActive = (F["Trig_Enable"] == true) and (not kbTrig or kbTrig.Mode == "Always" or kbTrig.Active)
+            local forceBaim = (F["Rage_ForceBaim"] == true) and (not kbBaim or kbBaim.Mode ~= "Hold" or kbBaim.Active)
+                or (kbBaim and kbBaim.Mode == "Hold" and kbBaim.Active)
+
+            if rageActive or legitActive then
+                local fovLimitPx = legitActive and ((tonumber(F["Legit_FOV"]) or 4.5) * 12) or ((tonumber(F["Rage_FOV"]) or 180) * 1.6)
+                local dzPx = legitActive and ((tonumber(F["Legit_Deadzone"]) or 0) * 8) or 0
+                local priority = F["Rage_Priority"] or "FOV Closest"
+                local allowWall = rageActive and (F["Rage_Autowall"] == true)
+                local hbMap = type(F["Rage_Hitboxes"]) == "table" and F["Rage_Hitboxes"] or nil
+
+                local rayParams = RaycastParams.new()
+                rayParams.FilterType = Enum.RaycastFilterType.Exclude
+                local ignoreList = { cam }
+                if myChar then table.insert(ignoreList, myChar) end
+                local rayIgnore = workspace:FindFirstChild("Ray_Ignore")
+                if rayIgnore then table.insert(ignoreList, rayIgnore) end
+                rayParams.FilterDescendantsInstances = ignoreList
+
+                local function ResolveTargetPart(char, tel)
+                    if forceBaim then
+                        return char:FindFirstChild("LowerTorso") or char:FindFirstChild("Torso") or tel.RootPart
+                    end
+                    if hbMap and next(hbMap) ~= nil then
+                        if hbMap["Head"] and char:FindFirstChild("Head") then return char.Head end
+                        if (hbMap["Upper Chest"] or hbMap["Neck"]) and (char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")) then
+                            return char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
+                        end
+                        if hbMap["Pelvis"] and (char:FindFirstChild("LowerTorso") or tel.RootPart) then
+                            return char:FindFirstChild("LowerTorso") or tel.RootPart
+                        end
+                        if hbMap["Arms"] and (char:FindFirstChild("RightUpperArm") or char:FindFirstChild("Right Arm")) then
+                            return char:FindFirstChild("RightUpperArm") or char:FindFirstChild("Right Arm")
+                        end
+                        if (hbMap["Legs"] or hbMap["Feet"]) and (char:FindFirstChild("RightUpperLeg") or char:FindFirstChild("Right Leg")) then
+                            return char:FindFirstChild("RightUpperLeg") or char:FindFirstChild("Right Leg")
+                        end
+                    end
+                    return tel.Head or tel.RootPart
+                end
+
+                local bestAimPart = nil
+                local bestPlr = nil
+                local bestScore = math.huge
+                for _, plr in ipairs(Players:GetPlayers()) do
+                    if plr ~= LocalPlayer then
+                        local isWhitelisted = (F["Misc_Whitelist"] == true) and (F["Misc_PlayerTarget"] == plr.Name)
+                        local tel = self:GetPlayerTelemetry(plr)
+                        if not isWhitelisted and tel and tel.Alive and (not F["ESP_TeamCheck"] or not tel.IsTeammate) then
+                            local part = ResolveTargetPart(tel.Character, tel)
+                            if part then
+                                local sp, onScr = cam:WorldToViewportPoint(part.Position)
+                                if (onScr or (rageActive and (tonumber(F["Rage_FOV"]) or 180) >= 150)) and sp.Z > 0 then
+                                    local fovDist = (Vector2.new(sp.X, sp.Y) - mPos).Magnitude
+                                    if fovDist <= fovLimitPx and fovDist >= dzPx then
+                                        local visible = allowWall
+                                        if not visible then
+                                            local dir = part.Position - cam.CFrame.Position
+                                            local hit = workspace:Raycast(cam.CFrame.Position, dir, rayParams)
+                                            visible = (not hit) or hit.Instance:IsDescendantOf(tel.Character)
+                                        end
+                                        if visible then
+                                            local score = fovDist
+                                            if rageActive then
+                                                if priority == "Lowest HP" then
+                                                    score = tel.HP
+                                                elseif priority == "Shortest Distance" then
+                                                    score = (part.Position - cam.CFrame.Position).Magnitude
+                                                elseif priority == "Highest Threat" then
+                                                    score = (part.Position - cam.CFrame.Position).Magnitude * 0.5 + tel.HP
+                                                end
+                                            end
+                                            if score < bestScore then
+                                                bestScore = score
+                                                bestAimPart = part
+                                                bestPlr = plr
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+
+                if bestAimPart then
+                    local aimPos = bestAimPart.Position
+                    if legitActive and F["Legit_RCS"] then
+                        aimPos = aimPos - Vector3.new(0, 0.18, 0)
+                    end
+                    local targetCF = CFrame.lookAt(cam.CFrame.Position, aimPos)
+                    if rageActive then
+                        if F["Rage_QuickStop"] and myHrp and myHum and myHum.FloorMaterial ~= Enum.Material.Air then
+                            local v = myHrp.AssemblyLinearVelocity
+                            myHrp.AssemblyLinearVelocity = Vector3.new(v.X * 0.12, v.Y, v.Z * 0.12)
+                        end
+                        cam.CFrame = (F["Rage_Silent"] == true) and targetCF or cam.CFrame:Lerp(targetCF, 0.92)
+                        local fireCooldown = (F["Rage_DT"] == true) and 0.08 or 0.18
+                        if F["Rage_AutoFire"] and (os.clock() - lastRageFire) >= fireCooldown then
+                            lastRageFire = os.clock()
+                            local eqTool = myChar and myChar:FindFirstChildOfClass("Tool")
+                            if eqTool then pcall(function() eqTool:Activate() end) end
+                            pcall(function()
+                                if mouse1click and not self.Open then mouse1click() end
+                            end)
+                            SpawnTracer(bestPlr and bestPlr.Name or aimPos)
+                        end
+                    else
+                        local smooth = math.max(1, tonumber(F["Legit_Smooth"]) or 6.5)
+                        local alpha = math.clamp((1 / smooth) * (dt * 60), 0.04, 1)
+                        cam.CFrame = cam.CFrame:Lerp(targetCF, alpha)
+                    end
+                end
+            end
+
+            if trigActive and (os.clock() - lastTrigFire) >= ((tonumber(F["Trig_Delay"]) or 35) / 1000) then
+                local rayParams = RaycastParams.new()
+                rayParams.FilterType = Enum.RaycastFilterType.Exclude
+                local ignoreList = { cam }
+                if myChar then table.insert(ignoreList, myChar) end
+                local rayIgnore = workspace:FindFirstChild("Ray_Ignore")
+                if rayIgnore then table.insert(ignoreList, rayIgnore) end
+                rayParams.FilterDescendantsInstances = ignoreList
+                local hit = workspace:Raycast(cam.CFrame.Position, cam.CFrame.LookVector * 600, rayParams)
+                if hit and hit.Instance then
+                    for _, plr in ipairs(Players:GetPlayers()) do
+                        if plr ~= LocalPlayer and plr.Character and hit.Instance:IsDescendantOf(plr.Character) then
+                            local tel = self:GetPlayerTelemetry(plr)
+                            if tel and tel.Alive and (not F["ESP_TeamCheck"] or not tel.IsTeammate) then
+                                lastTrigFire = os.clock()
+                                local eqTool = myChar and myChar:FindFirstChildOfClass("Tool")
+                                if eqTool then pcall(function() eqTool:Activate() end) end
+                                pcall(function()
+                                    if mouse1click and not self.Open then mouse1click() end
+                                end)
+                                break
+                            end
+                        end
+                    end
+                end
+            end
+
+            -- 3) Thirdperson Camera Offset (works in both Classic and Counter Blox LockFirstPerson/Scriptable cameras)
+            local kbTp = self.Options["World_TPKey"]
+            local tpActive = (F["World_TP"] == true) and (not kbTp or kbTp.Mode ~= "Hold" or kbTp.Active)
+            if tpActive then
+                tpApplied = true
+                local tpStuds = math.clamp((tonumber(F["World_TPDist"]) or 115) * 0.12, 4, 35)
+                cam.CFrame = cam.CFrame * CFrame.new(0, 1.2, tpStuds)
+                if myChar then
+                    for _, p in ipairs(myChar:GetDescendants()) do
+                        if p:IsA("BasePart") and p.Name ~= "HumanoidRootPart" and p.LocalTransparencyModifier > 0.5 then
+                            tpTransParts[p] = true
+                            p.LocalTransparencyModifier = 0
+                        end
+                    end
+                end
+            elseif tpApplied then
+                tpApplied = false
+                for p in pairs(tpTransParts) do
+                    if p and p.Parent then
+                        pcall(function() p.LocalTransparencyModifier = 0 end)
+                    end
+                end
+                table.clear(tpTransParts)
+            end
+
+            -- 4) Normalized 4:3 Aspect Ratio Stretch (never compounds across frames)
+            if F["World_Aspect_Enabled"] then
+                local ratio = math.clamp(tonumber(F["World_Aspect"]) or 0.78, 0.45, 1.5)
+                local cf = cam.CFrame
+                local right = cf.RightVector.Unit * ratio
+                local up = cf.UpVector.Unit
+                local back = -cf.LookVector.Unit
+                cam.CFrame = CFrame.fromMatrix(cf.Position, right, up, back)
+            end
         end)
     end)
 
@@ -4502,6 +4551,8 @@ function Library:CreateKeybindAttachment(parentRow, cfg, toggleLink)
         if currentKey and currentKey ~= Enum.KeyCode.Unknown then
             if mode == "Always" then
                 isShown = (toggleLink == nil) or (toggleLink.Value == true)
+            elseif mode == "Hold" then
+                isShown = (toggleLink == nil or toggleLink.Value == true) and (Keybind.Active == true)
             elseif toggleLink then
                 isShown = (toggleLink.Value == true)
             else
@@ -4532,14 +4583,10 @@ function Library:CreateKeybindAttachment(parentRow, cfg, toggleLink)
         end
         if mode == "Always" then
             Keybind.Active = true
-            if toggleLink and not toggleLink.Value then
-                toggleLink:Set(true)
-            end
         elseif mode == "Hold" then
             Keybind.Active = false
-            if toggleLink and toggleLink.Value then
-                toggleLink:Set(false)
-            end
+        elseif mode == "Toggle" and toggleLink then
+            Keybind.Active = (toggleLink.Value == true)
         end
         SyncKeybindList()
     end
@@ -4633,9 +4680,6 @@ function Library:CreateKeybindAttachment(parentRow, cfg, toggleLink)
                 end
             elseif mode == "Hold" then
                 Keybind.Active = true
-                if toggleLink then
-                    toggleLink:Set(true)
-                end
             end
             if cfg.Callback then
                 task.spawn(cfg.Callback, Keybind.Active, currentKey)
@@ -4649,9 +4693,6 @@ function Library:CreateKeybindAttachment(parentRow, cfg, toggleLink)
         local matched = (input.KeyCode == currentKey) or (input.UserInputType == currentKey)
         if matched and mode == "Hold" then
             Keybind.Active = false
-            if toggleLink then
-                toggleLink:Set(false)
-            end
             if cfg.Callback then
                 task.spawn(cfg.Callback, false, currentKey)
             end
@@ -8898,5 +8939,12 @@ function Library:Unload()
         ScreenGui:Destroy()
     end
 end
+
+pcall(function()
+    if getgenv then
+        getgenv().ShardsLibrary = Library
+    end
+    _G.ShardsLibrary = Library
+end)
 
 return Library
