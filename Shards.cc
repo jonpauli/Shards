@@ -440,6 +440,105 @@ function Library:ApplyCSBorder(frame, highlightKey)
     return innerStroke, blackStroke
 end
 
+-- ============================================================================
+-- COUNTER BLOX & UNIVERSAL ROBLOX TELEMETRY ADAPTER
+-- ============================================================================
+function Library:GetPlayerTelemetry(plr)
+    if not plr then return nil end
+    local char = plr.Character or (workspace:FindFirstChild(plr.Name))
+    local statusFolder = plr:FindFirstChild("Status")
+    local nrpbs = plr:FindFirstChild("NRPBS")
+
+    -- Counter Blox Status.Team ("T", "CT", "Spectator")
+    local cbTeam = statusFolder and statusFolder:FindFirstChild("Team") and statusFolder.Team.Value or nil
+    if cbTeam == "Spectator" then
+        return { Alive = false, Spectating = true, Team = "Spectator" }
+    end
+
+    local aliveVal = statusFolder and statusFolder:FindFirstChild("Alive")
+    if aliveVal and aliveVal.Value == false then
+        return { Alive = false, Spectating = true, Team = cbTeam or (plr.Team and plr.Team.Name) }
+    end
+
+    if not char then
+        return { Alive = false, Spectating = false }
+    end
+
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    local hrp = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso") or char.PrimaryPart
+    if not hrp then
+        return { Alive = false, Spectating = false }
+    end
+
+    local hp = 100
+    local maxHp = 100
+    if nrpbs and nrpbs:FindFirstChild("Health") then
+        hp = tonumber(nrpbs.Health.Value) or 100
+        local mh = nrpbs:FindFirstChild("MaxHealth")
+        maxHp = (mh and tonumber(mh.Value)) or 100
+    elseif hum then
+        hp = tonumber(hum.Health) or 0
+        maxHp = tonumber(hum.MaxHealth) or 100
+    end
+
+    if hp <= 0 then
+        return { Alive = false, Spectating = false }
+    end
+
+    -- Counter Blox EquippedTool (StringValue/ObjectValue on Character) or standard Tool
+    local weapName = "UNARMED"
+    local eqVal = char:FindFirstChild("EquippedTool")
+    if eqVal and eqVal.Value and tostring(eqVal.Value) ~= "" then
+        weapName = string.upper(tostring(eqVal.Value))
+    else
+        local tool = char:FindFirstChildOfClass("Tool")
+        if tool then
+            weapName = string.upper(tool.Name)
+        end
+    end
+
+    -- Counter Blox Armor / Helmet / Scoped / Flashed telemetry
+    local hasArmor = false
+    local hasHelmet = false
+    if nrpbs then
+        local arm = nrpbs:FindFirstChild("Armor")
+        local helm = nrpbs:FindFirstChild("Helmet")
+        hasArmor = arm and (tonumber(arm.Value) or 0) > 0 or false
+        hasHelmet = helm and (helm.Value == true or (tonumber(helm.Value) or 0) > 0) or false
+    elseif statusFolder then
+        local arm = statusFolder:FindFirstChild("Armor")
+        hasArmor = arm and (tonumber(arm.Value) or 0) > 0 or false
+    elseif char:FindFirstChild("Armor") then
+        hasArmor = true
+    end
+
+    local isTeammate = false
+    if LocalPlayer then
+        local myStatus = LocalPlayer:FindFirstChild("Status")
+        local myCbTeam = myStatus and myStatus:FindFirstChild("Team") and myStatus.Team.Value or nil
+        if cbTeam and myCbTeam then
+            isTeammate = (cbTeam == myCbTeam)
+        elseif plr.Team ~= nil and LocalPlayer.Team ~= nil then
+            isTeammate = (plr.Team == LocalPlayer.Team)
+        end
+    end
+
+    return {
+        Alive = true,
+        Character = char,
+        Humanoid = hum,
+        RootPart = hrp,
+        Head = char:FindFirstChild("Head") or hrp,
+        HP = math.clamp(math.floor(hp + 0.5), 0, math.max(1, math.floor(maxHp + 0.5))),
+        MaxHP = math.max(1, math.floor(maxHp + 0.5)),
+        Weapon = weapName,
+        HasArmor = hasArmor,
+        HasHelmet = hasHelmet,
+        IsTeammate = isTeammate,
+        TeamName = cbTeam or (plr.Team and plr.Team.Name) or "Enemy",
+    }
+end
+
 function Library:RegisterSearchable(holder, textLabel, name)
     local entry = {
         Holder = holder,
@@ -454,17 +553,55 @@ end
 function Library:ApplyGlobalSearch(query)
     local q = string.lower(string.gsub(tostring(query or ""), "^%s*(.-)%s*$", "%1"))
     self.SearchQuery = q
+    local groupMatches = {}
+    local tabMatches = {}
+
     for i = #self.SearchEntries, 1, -1 do
         local entry = self.SearchEntries[i]
         if entry.Holder and entry.Holder.Parent then
-            if q == "" then
-                entry.Holder.Visible = true
-            else
-                local matched = string.find(entry.Name, q, 1, true) ~= nil
-                entry.Holder.Visible = matched
+            local matched = (q == "") or (string.find(entry.Name, q, 1, true) ~= nil)
+            entry.Holder.Visible = matched
+            if matched and q ~= "" then
+                local curr = entry.Holder.Parent
+                while curr and curr ~= ScreenGui do
+                    if string.find(curr.Name, "^Group_") or string.find(curr.Name, "^Tabbox_") then
+                        groupMatches[curr] = (groupMatches[curr] or 0) + 1
+                    elseif string.find(curr.Name, "^Page_") then
+                        tabMatches[curr] = (tabMatches[curr] or 0) + 1
+                    end
+                    curr = curr.Parent
+                end
             end
         else
             table.remove(self.SearchEntries, i)
+        end
+    end
+
+    if self.ActiveWindow and self.ActiveWindow.Tabs then
+        for _, tab in ipairs(self.ActiveWindow.Tabs) do
+            local count = tabMatches[tab.Page] or 0
+            if q == "" then
+                tab.Label.Text = tab.Name
+            else
+                tab.Label.Text = count > 0 and string.format("%s (%d)", tab.Name, count) or tab.Name
+            end
+            for _, col in ipairs({ tab.Left, tab.Right }) do
+                if col then
+                    for _, grp in ipairs(col:GetChildren()) do
+                        if grp:IsA("Frame") and (string.find(grp.Name, "^Group_") or string.find(grp.Name, "^Tabbox_")) then
+                            grp.Visible = (q == "") or ((groupMatches[grp] or 0) > 0)
+                            local cont = grp:FindFirstChild("Container", true)
+                            if cont then
+                                for _, item in ipairs(cont:GetChildren()) do
+                                    if item:IsA("Frame") and item.Name == "Divider" then
+                                        item.Visible = (q == "")
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
         end
     end
 end
@@ -502,14 +639,18 @@ function Library:CreateAccentBar(parent, zIndex)
 end
 
 function Library:MakeDraggable(dragHandle, targetFrame, hudId, onMoveCallback)
-    if hudId or (targetFrame and targetFrame.Name and targetFrame.Name ~= "") then
-        self.HUDFrames[hudId or targetFrame.Name] = targetFrame
+    local resolvedId = hudId or (targetFrame and targetFrame.Name) or ""
+    if resolvedId ~= "" then
+        self.HUDFrames[resolvedId] = targetFrame
     end
     local dragging = false
     local dragStart, startPos
 
     self:Connect(dragHandle.InputBegan, function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            if resolvedId ~= "MainWindow" and self.Flags["UI_LockHUD"] == true then
+                return
+            end
             dragging = true
             dragStart = input.Position
             startPos = targetFrame.Position
@@ -554,13 +695,13 @@ function Library:RefreshAttachmentTray(tray)
         end
     end
     totalW += math.max(0, visibleCount - 1) * 5
-    local trayW = math.max(40, totalW + 4)
+    local trayW = visibleCount > 0 and math.max(28, totalW + 4) or 0
     tray.Size = UDim2.fromOffset(trayW, 16)
     local row = tray.Parent
     if row then
         local lbl = row:FindFirstChildOfClass("TextLabel")
         local clickBtn = row:FindFirstChildOfClass("TextButton")
-        local rightPad = trayW + 8
+        local rightPad = visibleCount > 0 and (trayW + 8) or 4
         if lbl then
             local leftX = lbl.Position.X.Offset
             lbl.Size = UDim2.new(1, -(leftX + rightPad), 1, 0)
@@ -1233,9 +1374,10 @@ function Library:CreateKeybindList()
         local count = 0
         local maxW = 195
 
+        local showAll = (Library.Flags["UI_KeybindListMode"] == "Show All Binds")
         for idx, flag in ipairs(Library.KeybindOrder) do
             local item = Library.ActiveKeybinds[flag]
-            if item and item.Active and item.Key and item.Key ~= Enum.KeyCode.Unknown then
+            if item and (item.Active or showAll) and item.Key and item.Key ~= Enum.KeyCode.Unknown then
                 activeFlags[flag] = true
                 count += 1
                 local modeStr = "[" .. string.lower(item.Mode or "toggle") .. "]"
@@ -1270,7 +1412,7 @@ function Library:CreateKeybindList()
                         Size = UDim2.new(0.62, -8, 1, 0),
                         Font = Enum.Font.Code,
                         Text = item.Name,
-                        TextColor3 = Library.Theme.Text,
+                        TextColor3 = item.Active and Library.Theme.Text or Library.Theme.TextDim,
                         TextSize = 12,
                         TextTransparency = 1,
                         TextXAlignment = Enum.TextXAlignment.Left,
@@ -1278,14 +1420,13 @@ function Library:CreateKeybindList()
                         ZIndex = 283,
                         Parent = row,
                     })
-                    Library:BindTheme(nameLbl, "TextColor3", "Text")
                     local modeLbl = Library:Create("TextLabel", {
                         BackgroundTransparency = 1,
                         Position = UDim2.new(0.62, 6, 0, 0),
                         Size = UDim2.new(0.38, 0, 1, 0),
                         Font = Enum.Font.Code,
                         Text = rightStr,
-                        TextColor3 = Library.Theme.Accent,
+                        TextColor3 = item.Active and Library.Theme.Accent or Library.Theme.TextMuted,
                         TextSize = 11,
                         TextTransparency = 1,
                         TextXAlignment = Enum.TextXAlignment.Right,
@@ -1293,7 +1434,6 @@ function Library:CreateKeybindList()
                         ZIndex = 283,
                         Parent = row,
                     })
-                    Library:BindTheme(modeLbl, "TextColor3", "Accent")
                     Library:Tween(nameLbl, TweenFast, {
                         Position = UDim2.fromOffset(8, 0),
                         TextTransparency = 0,
@@ -1310,7 +1450,9 @@ function Library:CreateKeybindList()
                 else
                     entry.Row.LayoutOrder = item.Order or idx
                     entry.NameLbl.Text = item.Name
+                    entry.NameLbl.TextColor3 = item.Active and Library.Theme.Text or Library.Theme.TextDim
                     entry.ModeLbl.Text = rightStr
+                    entry.ModeLbl.TextColor3 = item.Active and Library.Theme.Accent or Library.Theme.TextMuted
                 end
             end
         end
@@ -1429,21 +1571,24 @@ function Library:CreateSpectatorList()
             end
             local cam = workspace.CurrentCamera
             local myChar = LocalPlayer and LocalPlayer.Character
-            local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
             for _, plr in ipairs(Players:GetPlayers()) do
                 if plr ~= LocalPlayer then
                     local isWatching = false
+                    local watchMode = "cam"
                     pcall(function()
-                        if cam and myHum and myChar and not plr.Character then
+                        local tel = self:GetPlayerTelemetry(plr)
+                        if tel and tel.Spectating then
+                            isWatching = true
+                            watchMode = tel.Team == "Spectator" and "spec" or "dead"
+                        elseif cam and myChar and not plr.Character then
                             local dist = plr:DistanceFromCharacter(myChar:GetPivot().Position)
-                            -- Note: Roblox returns 0 when a player has no character; only non-zero < 4 indicates a replicated camera focus near us
                             if dist > 0 and dist < 4 then
                                 isWatching = true
                             end
                         end
                     end)
                     if isWatching then
-                        table.insert(entries, { Name = plr.Name, Mode = "cam" })
+                        table.insert(entries, { Name = plr.Name, Mode = watchMode })
                     end
                 end
             end
@@ -2165,8 +2310,43 @@ function Library:CreateIndicators()
         Parent = hitmarkerRoot,
     })
 
+    local HitsoundMap = {
+        ["Skeet Bell"]     = "rbxassetid://4817809188",
+        ["Neverlose"]      = "rbxassetid://6607204501",
+        ["Rust Headshot"]  = "rbxassetid://4764109000",
+        ["COD Hitmarker"]  = "rbxassetid://160432334",
+        ["Bameware"]       = "rbxassetid://3124331820",
+    }
+    local hitSoundInst = Instance.new("Sound")
+    hitSoundInst.Name = "ShardsHitsound"
+    hitSoundInst.Volume = 1
+    pcall(function() hitSoundInst.Parent = ScreenGui end)
+
+    function Library:PlayHitsound()
+        if not self.Flags["ESP_Hitsound"] or self.Unloaded then return end
+        local choice = self.Flags["ESP_HitsoundType"] or "Skeet Bell"
+        local asset = HitsoundMap[choice]
+        if choice == "Custom Asset" then
+            local raw = tostring(self.Flags["ESP_HitsoundCustom"] or "")
+            if string.find(raw, "rbxassetid://") then
+                asset = raw
+            elseif tonumber(raw) then
+                asset = "rbxassetid://" .. raw
+            end
+        end
+        if asset and hitSoundInst then
+            pcall(function()
+                hitSoundInst.SoundId = asset
+                hitSoundInst.Volume = math.clamp(tonumber(self.Flags["ESP_HitsoundVol"]) or 1, 0.1, 3)
+                hitSoundInst.PlaybackSpeed = math.clamp(tonumber(self.Flags["ESP_HitsoundPitch"]) or 1, 0.5, 2)
+                hitSoundInst:Play()
+            end)
+        end
+    end
+
     local hmToken = 0
     function Library:FlashHitmarker(dmg, isHead)
+        self:PlayHitsound()
         if self.Flags["ESP_Hitmarker"] == false then return end
         hmToken += 1
         local tok = hmToken
@@ -2517,29 +2697,26 @@ function Library:CreateRadar(cfg)
         local activeKeys = {}
         local otherCount = 0
         for _, plr in ipairs(Players:GetPlayers()) do
-            if plr ~= LocalPlayer and plr.Character then
-                local hum = plr.Character:FindFirstChildOfClass("Humanoid")
-                if not hum or hum.Health > 0 then
-                    local ok, tPos = pcall(function() return plr.Character:GetPivot().Position end)
-                    if ok and tPos then
-                        otherCount += 1
-                        activeKeys[plr.Name] = true
-                        local delta = tPos - myPos
-                        local rx = delta:Dot(refRight) / radarRange
-                        local ry = -delta:Dot(refLook) / radarRange
-                        local mag = math.sqrt(rx * rx + ry * ry)
-                        if mag > 1 then
-                            rx = rx / mag
-                            ry = ry / mag
-                        end
-                        local b = GetOrMakeBlip(plr.Name)
-                        local isSelected = (Library.Flags["Misc_PlayerTarget"] == plr.Name)
-                        local isTeammate = (LocalPlayer and plr.Team ~= nil and plr.Team == LocalPlayer.Team)
-                        b.Dot.Size = UDim2.fromOffset(blipScale, blipScale)
-                        b.Dot.Position = UDim2.new(0.5, math.floor(rx * halfW + 0.5), 0.5, math.floor(ry * halfH + 0.5))
-                        b.Dot.BackgroundColor3 = isSelected and self.Theme.Accent or (isTeammate and self.Theme.Success or self.Theme.Risky)
-                        b.Tag.Text = plr.Name
+            if plr ~= LocalPlayer then
+                local tel = self:GetPlayerTelemetry(plr)
+                if tel and tel.Alive and tel.RootPart then
+                    local tPos = tel.RootPart.Position
+                    otherCount += 1
+                    activeKeys[plr.Name] = true
+                    local delta = tPos - myPos
+                    local rx = delta:Dot(refRight) / radarRange
+                    local ry = -delta:Dot(refLook) / radarRange
+                    local mag = math.sqrt(rx * rx + ry * ry)
+                    if mag > 1 then
+                        rx = rx / mag
+                        ry = ry / mag
                     end
+                    local b = GetOrMakeBlip(plr.Name)
+                    local isSelected = (Library.Flags["Misc_PlayerTarget"] == plr.Name)
+                    b.Dot.Size = UDim2.fromOffset(blipScale, blipScale)
+                    b.Dot.Position = UDim2.new(0.5, math.floor(rx * halfW + 0.5), 0.5, math.floor(ry * halfH + 0.5))
+                    b.Dot.BackgroundColor3 = isSelected and self.Theme.Accent or (tel.IsTeammate and self.Theme.Success or self.Theme.Risky)
+                    b.Tag.Text = plr.Name
                 end
             end
         end
@@ -2957,6 +3134,23 @@ function Library:CreateWorldController()
         })
         self:Create("UIStroke", { Color = Color3.new(0, 0, 0), Thickness = 1, Transparency = 0.35, Parent = tracerLine })
 
+        -- 2D Skeleton Bone Line Pool (14 lines for R15 / R6 rigs)
+        local boneLines = {}
+        for bIdx = 1, 14 do
+            local bl = self:Create("Frame", {
+                Name = "Bone_" .. tostring(bIdx),
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                BackgroundColor3 = Color3.fromRGB(240, 240, 245),
+                BorderSizePixel = 0,
+                Size = UDim2.fromOffset(10, 1),
+                Visible = false,
+                ZIndex = 54,
+                Parent = overlayFolder,
+            })
+            self:Create("UIStroke", { Color = Color3.new(0, 0, 0), Thickness = 1, Transparency = 0.35, Parent = bl })
+            boneLines[bIdx] = bl
+        end
+
         -- Off-Screen Directional Indicator Arrow
         local oofArrow = self:Create("Frame", {
             AnchorPoint = Vector2.new(0.5, 0.5),
@@ -2996,12 +3190,62 @@ function Library:CreateWorldController()
             HpText = hpText,
             FlagLabels = flagLabels,
             Tracer = tracerLine,
+            Bones = boneLines,
             OOFArrow = oofArrow,
             OOFTag = oofTag,
             Highlight = nil,
+            GhostPart = nil,
+            History = {},
         }
         cards[plr] = c
         return c
+    end
+
+    local R15BonePairs = {
+        { "Head", "UpperTorso" },
+        { "UpperTorso", "LowerTorso" },
+        { "UpperTorso", "LeftUpperArm" },
+        { "LeftUpperArm", "LeftLowerArm" },
+        { "LeftLowerArm", "LeftHand" },
+        { "UpperTorso", "RightUpperArm" },
+        { "RightUpperArm", "RightLowerArm" },
+        { "RightLowerArm", "RightHand" },
+        { "LowerTorso", "LeftUpperLeg" },
+        { "LeftUpperLeg", "LeftLowerLeg" },
+        { "LeftLowerLeg", "LeftFoot" },
+        { "LowerTorso", "RightUpperLeg" },
+        { "RightUpperLeg", "RightLowerLeg" },
+        { "RightLowerLeg", "RightFoot" },
+    }
+    local R6BonePairs = {
+        { "Head", "Torso" },
+        { "Torso", "Left Arm" },
+        { "Torso", "Right Arm" },
+        { "Torso", "Left Leg" },
+        { "Torso", "Right Leg" },
+    }
+
+    -- Dropped Weapon & Planted C4 World ESP Cards (Counter Blox & Universal)
+    local worldItemCards = {}
+    local c4PlantTime = nil
+    local function GetOrMakeWorldItemCard(obj)
+        local wc = worldItemCards[obj]
+        if wc and wc.Label and wc.Label.Parent then return wc end
+        local lbl = self:Create("TextLabel", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            BackgroundTransparency = 1,
+            Size = UDim2.fromOffset(160, 14),
+            Font = Enum.Font.GothamBold,
+            Text = "",
+            TextColor3 = self.Theme.Accent,
+            TextSize = 10,
+            Visible = false,
+            ZIndex = 53,
+            Parent = overlayFolder,
+        })
+        wc = { Label = lbl }
+        worldItemCards[obj] = wc
+        return wc
     end
 
     local function DisconnectPlayerConns(plr)
@@ -3016,9 +3260,6 @@ function Library:CreateWorldController()
 
     local function HookCharacterHealth(plr, char)
         if not char or self.Unloaded then return end
-        local hum = char:FindFirstChildOfClass("Humanoid") or char:WaitForChild("Humanoid", 3)
-        if not hum or self.Unloaded then return end
-        trackedHealth[plr] = hum.Health
         local list = playerConns[plr]
         if not list then
             list = {}
@@ -3027,9 +3268,13 @@ function Library:CreateWorldController()
         if list.HealthConn then
             pcall(function() list.HealthConn:Disconnect() end)
         end
-        list.HealthConn = hum.HealthChanged:Connect(function(newHp)
+        if list.CBHealthConn then
+            pcall(function() list.CBHealthConn:Disconnect() end)
+        end
+
+        local function OnHealthUpdated(newHp, maxHp)
             if self.Unloaded then return end
-            local oldHp = trackedHealth[plr] or hum.MaxHealth
+            local oldHp = trackedHealth[plr] or maxHp or 100
             trackedHealth[plr] = newHp
             local diff = math.floor((oldHp - newHp) + 0.5)
             if diff > 0 and (Library.Flags["ESP_Box"] or Library.Flags["ESP_Name"] or Library.Flags["Rage_Enabled"]) then
@@ -3046,12 +3291,36 @@ function Library:CreateWorldController()
                         Name = plr.Name,
                         UserId = plr.UserId,
                         HP = rem,
-                        MaxHP = math.floor(hum.MaxHealth + 0.5),
+                        MaxHP = math.floor((maxHp or 100) + 0.5),
                     })
                 end
             end
-        end)
-        table.insert(list, list.HealthConn)
+        end
+
+        -- Counter Blox NRPBS.Health listener + standard Humanoid fallback
+        local nrpbs = plr:FindFirstChild("NRPBS")
+        local cbHpVal = nrpbs and nrpbs:FindFirstChild("Health")
+        if cbHpVal then
+            trackedHealth[plr] = tonumber(cbHpVal.Value) or 100
+            list.CBHealthConn = cbHpVal.Changed:Connect(function(val)
+                local mh = nrpbs:FindFirstChild("MaxHealth")
+                OnHealthUpdated(tonumber(val) or 0, (mh and tonumber(mh.Value)) or 100)
+            end)
+            table.insert(list, list.CBHealthConn)
+        end
+
+        local hum = char:FindFirstChildOfClass("Humanoid") or char:WaitForChild("Humanoid", 3)
+        if hum and not self.Unloaded then
+            if not cbHpVal then
+                trackedHealth[plr] = hum.Health
+            end
+            list.HealthConn = hum.HealthChanged:Connect(function(newHp)
+                if not cbHpVal then
+                    OnHealthUpdated(newHp, hum.MaxHealth)
+                end
+            end)
+            table.insert(list, list.HealthConn)
+        end
     end
 
     local function TrackPlayer(plr)
@@ -3235,7 +3504,7 @@ function Library:CreateWorldController()
             end
         end
 
-        -- Camera FOV, Aspect Ratio Stretch & Thirdperson
+        -- Camera FOV & Thirdperson (Aspect Ratio Stretch runs in BindToRenderStep after Camera update)
         if F["World_FOV_Enabled"] then
             if not fovApplied then
                 origCamFov = cam.FieldOfView
@@ -3245,12 +3514,6 @@ function Library:CreateWorldController()
         elseif fovApplied then
             fovApplied = false
             cam.FieldOfView = origCamFov
-        end
-
-        if F["World_Aspect_Enabled"] then
-            local ratio = math.clamp(tonumber(F["World_Aspect"]) or 0.78, 0.45, 1.5)
-            local x, y, z, r00, r01, r02, r10, r11, r12, r20, r21, r22 = cam.CFrame:GetComponents()
-            cam.CFrame = CFrame.new(x, y, z, r00, r01 * ratio, r02, r10, r11 * ratio, r12, r20, r21 * ratio, r22)
         end
 
         if LocalPlayer then
@@ -3273,7 +3536,7 @@ function Library:CreateWorldController()
         -- 3) LocalPlayer Movement Controller (WalkSpeed, JumpPower, Bhop, Air Strafe, Fast Stop)
         local myChar = LocalPlayer and LocalPlayer.Character
         local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
-        local myHrp = myChar and (myChar:FindFirstChild("HumanoidRootPart") or myChar.PrimaryPart)
+        local myHrp = myChar and (myChar:FindFirstChild("HumanoidRootPart") or myChar:FindFirstChild("Torso") or myChar.PrimaryPart)
         if myHum and myHrp then
             if F["Misc_Speed_Enabled"] then
                 speedApplied = true
@@ -3330,9 +3593,10 @@ function Library:CreateWorldController()
             end
         end
 
-        -- 4) 2D Player Overlays, Tracers, Off-Screen Arrows & Chams Highlights
+        -- 4) Counter Blox & Universal 2D Player Overlays, Skeleton, Backtrack Ghost, Tracers, Off-Screen Arrows & Chams
         local anyESP = F["ESP_Box"] or F["ESP_Name"] or F["ESP_Health"] or F["ESP_Weapon"] or F["ESP_Glow"]
-            or F["ESP_Tracers"] or F["ESP_OOF"] or F["ESP_HeadDot"] or F["Chams_Vis"] or F["Chams_XQZ"]
+            or F["ESP_Tracers"] or F["ESP_OOF"] or F["ESP_HeadDot"] or F["ESP_Skeleton"] or F["ESP_Backtrack"]
+            or F["Chams_Vis"] or F["Chams_XQZ"]
         local maxDist = tonumber(F["ESP_MaxDist"]) or 2000
         local teamCheck = (F["ESP_TeamCheck"] == true)
         local boxStyle = F["ESP_BoxStyle"] or "Full 2D"
@@ -3342,20 +3606,21 @@ function Library:CreateWorldController()
         local activeFlags = type(F["ESP_Flags"]) == "table" and F["ESP_Flags"] or nil
         local chamsMat = F["Chams_Mat"] or "Metallic"
         local pulseWave = 0.5 + 0.5 * math.sin(os.clock() * 4.2)
+        local nowClock = os.clock()
+        local btWindow = math.clamp((tonumber(F["ESP_BacktrackTime"]) or 200) / 1000, 0.05, 0.45)
 
         for _, plr in ipairs(Players:GetPlayers()) do
             if plr ~= LocalPlayer then
                 local isWhitelisted = (F["Misc_Whitelist"] == true) and (F["Misc_PlayerTarget"] == plr.Name)
-                local isTeammate = (LocalPlayer and plr.Team ~= nil and plr.Team == LocalPlayer.Team)
-                local skipTeam = teamCheck and isTeammate
-                local char = plr.Character
-                local hum = char and char:FindFirstChildOfClass("Humanoid")
-                local hrp = char and (char:FindFirstChild("HumanoidRootPart") or char.PrimaryPart)
+                local tel = self:GetPlayerTelemetry(plr)
+                local skipTeam = teamCheck and (tel and tel.IsTeammate or false)
+                local char = tel and tel.Character
+                local hrp = tel and tel.RootPart
                 local distStuds = 0
                 if hrp then
                     distStuds = (cam.CFrame.Position - hrp.Position).Magnitude
                 end
-                if anyESP and not isWhitelisted and not skipTeam and char and hum and hrp and hum.Health > 0 and distStuds <= maxDist then
+                if anyESP and not isWhitelisted and not skipTeam and tel and tel.Alive and char and hrp and distStuds <= maxDist then
                     local c = GetOrMakeCard(plr)
                     local topPos, onScreenTop = cam:WorldToViewportPoint(hrp.Position + Vector3.new(0, 2.8, 0))
                     local botPos, onScreenBot = cam:WorldToViewportPoint(hrp.Position - Vector3.new(0, 3.2, 0))
@@ -3387,19 +3652,54 @@ function Library:CreateWorldController()
 
                         c.HeadDot.Visible = (F["ESP_HeadDot"] == true)
                         c.HeadDot.BackgroundColor3 = boxCol
-                        local headPart = char:FindFirstChild("Head")
+                        local headPart = tel.Head
                         if headPart and c.HeadDot.Visible then
                             local hp2d = cam:WorldToViewportPoint(headPart.Position)
                             c.HeadDot.Position = UDim2.fromOffset(math.floor(hp2d.X - rx + 0.5), math.floor(hp2d.Y - ry + 0.5))
                         end
 
+                        -- 2D Skeleton / Bone Lines (R15 & R6)
+                        if F["ESP_Skeleton"] == true then
+                            local skelCol = F["ESP_SkeletonCol"] or Color3.fromRGB(240, 240, 245)
+                            local pairsList = char:FindFirstChild("UpperTorso") and R15BonePairs or R6BonePairs
+                            for bIdx, bl in ipairs(c.Bones) do
+                                local pair = pairsList[bIdx]
+                                local pA = pair and char:FindFirstChild(pair[1])
+                                local pB = pair and char:FindFirstChild(pair[2])
+                                if pA and pB and pA:IsA("BasePart") and pB:IsA("BasePart") then
+                                    local vA, okA = cam:WorldToViewportPoint(pA.Position)
+                                    local vB, okB = cam:WorldToViewportPoint(pB.Position)
+                                    if (okA or okB) and vA.Z > 0 and vB.Z > 0 then
+                                        local ptA = Vector2.new(vA.X, vA.Y)
+                                        local ptB = Vector2.new(vB.X, vB.Y)
+                                        local dVec = ptB - ptA
+                                        local len = dVec.Magnitude
+                                        local mid = (ptA + ptB) * 0.5
+                                        bl.Visible = true
+                                        bl.BackgroundColor3 = skelCol
+                                        bl.Position = UDim2.fromOffset(mid.X, mid.Y)
+                                        bl.Size = UDim2.fromOffset(len, 1)
+                                        bl.Rotation = math.deg(math.atan2(dVec.Y, dVec.X))
+                                    else
+                                        bl.Visible = false
+                                    end
+                                else
+                                    bl.Visible = false
+                                end
+                            end
+                        else
+                            for _, bl in ipairs(c.Bones) do
+                                bl.Visible = false
+                            end
+                        end
+
                         c.Name.Visible = (F["ESP_Name"] == true)
                         c.Name.TextColor3 = F["ESP_NameColor"] or self.Theme.Text
-                        c.Name.Text = string.format("%s [%d]", plr.Name, math.floor(hum.Health + 0.5))
+                        c.Name.Text = string.format("%s [%d]", plr.Name, tel.HP)
 
                         local showHp = (F["ESP_Health"] == true)
                         c.HpBg.Visible = showHp
-                        local hpRatio = math.clamp(hum.Health / math.max(1, hum.MaxHealth), 0, 1)
+                        local hpRatio = math.clamp(tel.HP / tel.MaxHP, 0, 1)
                         c.HpFill.BackgroundColor3 = Color3.fromHSV(hpRatio * 0.33, 0.85, 0.92)
                         if hpBarPos == "Bottom" then
                             c.HpBg.Position = UDim2.new(0, 0, 1, 3)
@@ -3425,22 +3725,23 @@ function Library:CreateWorldController()
                         end
                         c.HpText.Visible = showHp and showHpText
                         if c.HpText.Visible then
-                            c.HpText.Text = tostring(math.floor(hum.Health + 0.5))
+                            c.HpText.Text = tostring(tel.HP)
                             c.HpText.Position = UDim2.new(0, -2, 1 - hpRatio, 0)
                         end
 
-                        local tool = char:FindFirstChildOfClass("Tool")
                         c.Dist.Visible = (F["ESP_Weapon"] == true)
                         c.Dist.TextColor3 = F["ESP_WeaponColor"] or self.Theme.TextDim
-                        c.Dist.Text = tool and string.upper(tool.Name) or "UNARMED"
+                        c.Dist.Text = tel.Weapon
 
-                        -- Live Right-Side ESP Flags
+                        -- Live Right-Side ESP Flags (Counter Blox Armor/Helmet/Distance/Ping aware)
                         for key, fl in pairs(c.FlagLabels) do
                             local enabled = activeFlags and (activeFlags[key] == true) or false
-                            fl.Visible = enabled
-                            if enabled and key == "Distance" then
+                            if enabled and key == "Armor (HK)" then
+                                fl.Text = tel.HasHelmet and "HK" or (tel.HasArmor and "K" or "HK")
+                            elseif enabled and key == "Distance" then
                                 fl.Text = string.format("%dFT", math.floor(distStuds + 0.5))
                             end
+                            fl.Visible = enabled
                         end
 
                         -- 2D Snapline / Tracer
@@ -3466,6 +3767,9 @@ function Library:CreateWorldController()
                     else
                         c.Root.Visible = false
                         c.Tracer.Visible = false
+                        for _, bl in ipairs(c.Bones) do
+                            bl.Visible = false
+                        end
 
                         -- Off-Screen Arrow when player is behind or outside viewport
                         if F["ESP_OOF"] == true then
@@ -3485,6 +3789,37 @@ function Library:CreateWorldController()
                         else
                             c.OOFArrow.Visible = false
                         end
+                    end
+
+                    -- Backtrack Lag-Compensated Ghost Trail
+                    if F["ESP_Backtrack"] == true then
+                        table.insert(c.History, { Time = nowClock, CF = hrp.CFrame })
+                        while #c.History > 1 and (nowClock - c.History[1].Time) > btWindow do
+                            table.remove(c.History, 1)
+                        end
+                        local oldest = c.History[1]
+                        if oldest and (hrp.Position - oldest.CF.Position).Magnitude > 0.8 then
+                            if not c.GhostPart or not c.GhostPart.Parent then
+                                local gp = Instance.new("Part")
+                                gp.Name = "ShardsBacktrackGhost"
+                                gp.Anchored = true
+                                gp.CanCollide = false
+                                gp.CanQuery = false
+                                gp.CanTouch = false
+                                gp.CastShadow = false
+                                gp.Material = Enum.Material.Neon
+                                gp.Size = Vector3.new(2, 4.6, 1)
+                                gp.Parent = beamFolder
+                                c.GhostPart = gp
+                            end
+                            c.GhostPart.Color = F["ESP_BacktrackCol"] or self.Theme.Accent
+                            c.GhostPart.Transparency = 0.68
+                            c.GhostPart.CFrame = oldest.CF
+                        elseif c.GhostPart then
+                            c.GhostPart.Transparency = 1
+                        end
+                    elseif c.GhostPart then
+                        c.GhostPart.Transparency = 1
                     end
 
                     -- Highlight Chams & Glow Stencil (Material-Aware)
@@ -3531,17 +3866,92 @@ function Library:CreateWorldController()
                         c.Root.Visible = false
                         c.Tracer.Visible = false
                         c.OOFArrow.Visible = false
+                        for _, bl in ipairs(c.Bones) do
+                            bl.Visible = false
+                        end
+                        if c.GhostPart then c.GhostPart.Transparency = 1 end
                         if c.Highlight then c.Highlight.Enabled = false end
                     end
                 end
             end
         end
+
+        -- 5) Counter Blox Dropped Weapons & Planted C4 Bomb ESP (workspace.Debris / workspace.C4)
+        local showDropped = (F["World_DroppedESP"] == true)
+        local showBomb = (F["World_BombESP"] == true)
+        local seenWorldItems = {}
+        if showDropped or showBomb then
+            local debrisFolder = workspace:FindFirstChild("Debris")
+            local scanContainers = { debrisFolder, workspace }
+            for _, container in ipairs(scanContainers) do
+                if container then
+                    for _, item in ipairs(container:GetChildren()) do
+                        local isC4 = (item.Name == "C4" or string.find(string.upper(item.Name), "C4"))
+                        local isWeaponDrop = (container == debrisFolder and (item:IsA("Model") or item:IsA("BasePart") or item:IsA("Tool")) and not isC4)
+                            or (container == workspace and item:IsA("Tool"))
+                        if (isC4 and showBomb) or (isWeaponDrop and showDropped) then
+                            local pos
+                            if item:IsA("BasePart") then
+                                pos = item.Position
+                            elseif item:IsA("Model") or item:IsA("Tool") then
+                                local okP, p = pcall(function() return item:GetPivot().Position end)
+                                if okP then pos = p end
+                            end
+                            if pos then
+                                local sp, onScr = cam:WorldToViewportPoint(pos)
+                                if onScr and sp.Z > 0 then
+                                    seenWorldItems[item] = true
+                                    local wc = GetOrMakeWorldItemCard(item)
+                                    local distFt = math.floor((cam.CFrame.Position - pos).Magnitude + 0.5)
+                                    if isC4 then
+                                        if not c4PlantTime then c4PlantTime = nowClock end
+                                        local remSec = math.max(0, 40 - (nowClock - c4PlantTime))
+                                        wc.Label.Text = string.format("[C4 BOMB // %.1fs] (%dft)", remSec, distFt)
+                                        wc.Label.TextColor3 = self.Theme.Risky
+                                    else
+                                        wc.Label.Text = string.format("[%s] %dft", string.upper(item.Name), distFt)
+                                        wc.Label.TextColor3 = F["ESP_WeaponColor"] or self.Theme.Accent
+                                    end
+                                    wc.Label.Position = UDim2.fromOffset(sp.X, sp.Y)
+                                    wc.Label.Visible = true
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        else
+            c4PlantTime = nil
+        end
+        for obj, wc in pairs(worldItemCards) do
+            if not seenWorldItems[obj] or not obj.Parent then
+                if not obj.Parent then
+                    if wc.Label then wc.Label:Destroy() end
+                    worldItemCards[obj] = nil
+                else
+                    wc.Label.Visible = false
+                end
+            end
+        end
+    end)
+
+    -- Bind Aspect Ratio Stretch at Camera + 1 priority so Roblox's camera controller never overwrites it
+    pcall(function()
+        RunService:BindToRenderStep("ShardsAspectStretch", Enum.RenderPriority.Camera.Value + 1, function()
+            if self.Unloaded or not self.Flags["World_Aspect_Enabled"] then return end
+            local cam = workspace.CurrentCamera
+            if not cam then return end
+            local ratio = math.clamp(tonumber(self.Flags["World_Aspect"]) or 0.78, 0.45, 1.5)
+            local x, y, z, r00, r01, r02, r10, r11, r12, r20, r21, r22 = cam.CFrame:GetComponents()
+            cam.CFrame = CFrame.new(x, y, z, r00, r01 * ratio, r02, r10, r11 * ratio, r12, r20, r21 * ratio, r22)
+        end)
     end)
 
     self.WorldController = {
         Folder = overlayFolder,
         SpawnTracer = SpawnTracer,
         Cleanup = function()
+            pcall(function() RunService:UnbindFromRenderStep("ShardsAspectStretch") end)
             for plr in pairs(playerConns) do
                 DisconnectPlayerConns(plr)
             end
@@ -3549,8 +3959,18 @@ function Library:CreateWorldController()
                 if c.Highlight then
                     pcall(function() c.Highlight:Destroy() end)
                 end
+                if c.GhostPart then
+                    pcall(function() c.GhostPart:Destroy() end)
+                end
+                for _, bl in ipairs(c.Bones or {}) do
+                    pcall(function() bl:Destroy() end)
+                end
             end
             table.clear(cards)
+            for _, wc in pairs(worldItemCards) do
+                if wc.Label then pcall(function() wc.Label:Destroy() end) end
+            end
+            table.clear(worldItemCards)
             if beamFolder and beamFolder.Parent then
                 pcall(function() beamFolder:Destroy() end)
             end
@@ -3902,6 +4322,7 @@ function Library:CreateKeybindAttachment(parentRow, cfg, toggleLink)
         if currentKey == Enum.KeyCode.Unknown then return end
         if UserInputService:GetFocusedTextBox() ~= nil then return end
         if gpe and input.UserInputType == Enum.UserInputType.Keyboard then return end
+        if self.Open and self.Flags["UI_MenuPauseBinds"] == true and flag ~= "UI_MenuKeybind" then return end
         local matched = (input.KeyCode == currentKey) or (input.UserInputType == currentKey)
         if matched then
             if mode == "Toggle" then
@@ -4438,10 +4859,10 @@ function GroupboxMethods:AddToggle(cfg)
     })
     Library:AddTooltip(row, cfg.Tooltip)
 
-    -- Clickable area covering box + label
+    -- Clickable area covering box + label (expands to full width when no attachments exist)
     local clickBtn = Library:Create("TextButton", {
         BackgroundTransparency = 1,
-        Size = UDim2.new(1, -60, 1, 0),
+        Size = UDim2.new(1, -4, 1, 0),
         Text = "",
         ZIndex = 11,
         Parent = row,
@@ -4510,7 +4931,7 @@ function GroupboxMethods:AddToggle(cfg)
     local label = Library:Create("TextLabel", {
         BackgroundTransparency = 1,
         Position = UDim2.fromOffset(22, 0),
-        Size = UDim2.new(1, -75, 1, 0),
+        Size = UDim2.new(1, -26, 1, 0),
         Font = Enum.Font.Code,
         Text = name,
         TextColor3 = state and Library.Theme.Text or (risky and Library.Theme.Risky or Library.Theme.TextDim),
@@ -4528,7 +4949,7 @@ function GroupboxMethods:AddToggle(cfg)
         BackgroundTransparency = 1,
         AnchorPoint = Vector2.new(1, 0.5),
         Position = UDim2.new(1, 0, 0.5, 0),
-        Size = UDim2.fromOffset(85, 16),
+        Size = UDim2.fromOffset(0, 16),
         ZIndex = 12,
         Parent = row,
     })
@@ -4653,11 +5074,19 @@ function GroupboxMethods:AddToggle(cfg)
             if state then
                 depWrapper.Visible = true
                 if animate then
+                    depWrapper.ClipsDescendants = true
                     Library:Tween(depWrapper, TweenFast, { Size = UDim2.new(1, 0, 0, h) })
+                    task.delay(0.15, function()
+                        if subToken == tok and state then
+                            depWrapper.ClipsDescendants = false
+                        end
+                    end)
                 else
                     depWrapper.Size = UDim2.new(1, 0, 0, h)
+                    depWrapper.ClipsDescendants = false
                 end
             else
+                depWrapper.ClipsDescendants = true
                 if animate then
                     Library:Tween(depWrapper, TweenFast, { Size = UDim2.new(1, 0, 0, 0) })
                     task.delay(0.14, function()
@@ -4755,7 +5184,7 @@ function GroupboxMethods:AddSlider(cfg)
     Library:BindTheme(topLabel, "TextColor3", "TextDim")
     Library:RegisterSearchable(holder, topLabel, name)
 
-    local valLabel = Library:Create("TextLabel", {
+    local valLabel = Library:Create("TextBox", {
         BackgroundTransparency = 1,
         Position = UDim2.fromScale(0.65, 0),
         Size = UDim2.new(0.35, 0, 0, 15),
@@ -4763,6 +5192,7 @@ function GroupboxMethods:AddSlider(cfg)
         Text = tostring(value) .. suffix,
         TextColor3 = Library.Theme.Text,
         TextSize = 12,
+        ClearTextOnFocus = false,
         TextXAlignment = Enum.TextXAlignment.Right,
         ZIndex = 10,
         Parent = holder,
@@ -4891,6 +5321,15 @@ function GroupboxMethods:AddSlider(cfg)
     Library:Connect(track.MouseLeave, function()
         if not dragging then
             Library:Tween(trackStroke, TweenFast, { Color = Library.Theme.InnerBorder })
+        end
+    end)
+
+    Library:Connect(valLabel.FocusLost, function()
+        local rawNum = tonumber(string.match(valLabel.Text, "[-+]?%d*%.?%d+"))
+        if rawNum then
+            Slider:Set(rawNum)
+        else
+            valLabel.Text = FormatValue(value)
         end
     end)
 
@@ -6935,6 +7374,7 @@ function Library:CreateWindow(cfg)
         return Tab
     end
 
+    self.ActiveWindow = Window
     return Window
 end
 
@@ -7261,6 +7701,40 @@ function Library:CreateESPPreview(window, targetTab)
     self:Create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = previewHeadDot })
     self:Create("UIStroke", { Color = Color3.new(0, 0, 0), Thickness = 1, Parent = previewHeadDot })
 
+    -- Preview Skeleton Bone Lines inside Dummy
+    local previewBones = {}
+    local pBoneCoords = {
+        { 46, 14, 46, 31 }, -- Head -> Neck
+        { 46, 31, 46, 85 }, -- Neck -> Pelvis
+        { 46, 40, 14, 42 }, -- Left Shoulder
+        { 14, 42, 14, 90 }, -- Left Arm
+        { 46, 40, 78, 42 }, -- Right Shoulder
+        { 78, 42, 78, 90 }, -- Right Arm
+        { 46, 85, 34, 106 }, -- Left Hip
+        { 34, 106, 34, 166 }, -- Left Leg
+        { 46, 85, 58, 106 }, -- Right Hip
+        { 58, 106, 58, 166 }, -- Right Leg
+    }
+    for _, bc in ipairs(pBoneCoords) do
+        local pA = Vector2.new(bc[1], bc[2])
+        local pB = Vector2.new(bc[3], bc[4])
+        local dVec = pB - pA
+        local mid = (pA + pB) * 0.5
+        local bl = self:Create("Frame", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            BackgroundColor3 = Color3.fromRGB(240, 240, 245),
+            BorderSizePixel = 0,
+            Position = UDim2.fromOffset(mid.X, mid.Y),
+            Rotation = math.deg(math.atan2(dVec.Y, dVec.X)),
+            Size = UDim2.fromOffset(dVec.Magnitude, 1),
+            Visible = false,
+            ZIndex = 28,
+            Parent = dummyRoot,
+        })
+        self:Create("UIStroke", { Color = Color3.new(0, 0, 0), Thickness = 1, Transparency = 0.35, Parent = bl })
+        table.insert(previewBones, bl)
+    end
+
     local previewTracer = self:Create("Frame", {
         AnchorPoint = Vector2.new(0.5, 0),
         BackgroundColor3 = Color3.fromRGB(155, 195, 55),
@@ -7422,6 +7896,13 @@ function Library:CreateESPPreview(window, targetTab)
         previewHeadDot.Visible = (F["ESP_HeadDot"] == true)
         previewHeadDot.BackgroundColor3 = boxCol
 
+        local showSkel = (F["ESP_Skeleton"] == true)
+        local skelCol = F["ESP_SkeletonCol"] or Color3.fromRGB(240, 240, 245)
+        for _, bl in ipairs(previewBones) do
+            bl.Visible = showSkel
+            bl.BackgroundColor3 = skelCol
+        end
+
         previewTracer.Visible = (F["ESP_Tracers"] == true)
         previewTracer.BackgroundColor3 = F["ESP_TracerColor"] or boxCol
 
@@ -7563,7 +8044,7 @@ end
 function Library:GetConfigJSON(overrides)
     local data = {}
     for flag, opt in pairs(self.Options) do
-        if flag ~= "UI_ConfigName" and flag ~= "UI_ConfigList" then
+        if flag ~= "UI_ConfigName" and flag ~= "UI_ConfigList" and flag ~= "UI_RawConfigJSON" then
             if opt.Type == "Toggle" or opt.Type == "Slider" or opt.Type == "Input" or opt.Type == "Dropdown" or opt.Type == "Listbox" then
                 data[flag] = { Type = opt.Type, Value = opt.Value }
             elseif opt.Type == "ColorPicker" then
@@ -7626,7 +8107,7 @@ function Library:LoadConfigJSON(jsonStr)
         end
     end
     for flag, entry in pairs(decoded) do
-        if flag ~= "UI_ConfigName" and flag ~= "UI_ConfigList" then
+        if flag ~= "UI_ConfigName" and flag ~= "UI_ConfigList" and flag ~= "UI_RawConfigJSON" then
             local opt = self.Options[flag]
             if opt and type(entry) == "table" then
                 if entry.Type == "ColorPicker" and entry.R then
@@ -7698,13 +8179,35 @@ function Library:BuildConfigTab(tab)
         end
     })
 
-    themeGroup:AddToggle({
+    local kbToggle = themeGroup:AddToggle({
         Name = "Show Keybind List",
         Flag = "UI_ShowKeybinds",
         Default = false,
         Callback = function(v)
             if self.KeybindList then self.KeybindList:SetVisible(v) end
         end
+    })
+    local kbSub = kbToggle:AddSubSection()
+    kbSub:AddDropdown({
+        Name = "Keybind List Mode",
+        Flag = "UI_KeybindListMode",
+        Values = { "Active Binds Only", "Show All Binds" },
+        Default = "Active Binds Only",
+        Callback = function()
+            if self.KeybindList then self.KeybindList:Refresh() end
+        end
+    })
+
+    themeGroup:AddToggle({
+        Name = "Lock HUD Panel Positions",
+        Flag = "UI_LockHUD",
+        Default = false,
+    })
+
+    themeGroup:AddToggle({
+        Name = "Pause Keybinds While Menu Open",
+        Flag = "UI_MenuPauseBinds",
+        Default = false,
     })
 
     themeGroup:AddToggle({
@@ -8023,15 +8526,45 @@ function Library:BuildConfigTab(tab)
         end
     })
 
+    local rawJsonInput = cfgGroup:AddInput({
+        Name = "Clipboard / Raw JSON Payload",
+        Flag = "UI_RawConfigJSON",
+        Default = "",
+        Placeholder = "Paste JSON string or use Import...",
+    })
+
     deleteBtn:AddButton({
         Name = "Export JSON",
         Icon = "clipboard",
         Callback = function()
             local json = self:GetConfigJSON()
+            if rawJsonInput then
+                rawJsonInput:Set(json)
+            end
             pcall(function()
                 if setclipboard then setclipboard(json) end
             end)
             self:Notify({ Title = "Clipboard", Description = "Exported JSON config string.", Icon = "clipboard" })
+        end
+    })
+
+    cfgGroup:AddButton({
+        Name = "Import JSON (Input / Clipboard)",
+        Icon = "upload",
+        Callback = function()
+            local payload = rawJsonInput and rawJsonInput.Value or ""
+            if not payload or payload == "" then
+                pcall(function()
+                    if getclipboard then
+                        payload = getclipboard()
+                    end
+                end)
+            end
+            if payload and payload ~= "" then
+                self:LoadConfigJSON(payload)
+            else
+                self:Notify({ Title = "Import Error", Description = "Paste a JSON string into the box first.", Icon = "alert-triangle", Color = self.Theme.Risky })
+            end
         end
     })
 
