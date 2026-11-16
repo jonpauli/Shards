@@ -997,6 +997,17 @@ function Library:AddHitlog(cfg)
         TextStrokeTransparency = 0.15,
     })
 
+    if not cfg.Miss then
+        local dmgVal = tonumber(cfg.Damage) or 100
+        local isHead = string.lower(tostring(cfg.Hitbox or "")) == "head"
+        if self.FlashHitmarker then
+            pcall(function() self:FlashHitmarker(dmgVal, isHead) end)
+        end
+        if self.WorldController and self.WorldController.SpawnTracer then
+            pcall(function() self.WorldController.SpawnTracer(cfg.Target) end)
+        end
+    end
+
     -- Cap active lines to 10 so rapid fire never overflows the screen
     local children = {}
     for _, ch in ipairs(HitlogHolder:GetChildren()) do
@@ -1082,6 +1093,47 @@ function Library:CreateWatermark(customTitle)
         or customTitle
         or self.Title
 
+    local function UpdateWatermarkText()
+        local ping = 0
+        pcall(function()
+            ping = math.floor(game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue())
+        end)
+        local customStr = self.Flags["UI_WatermarkText"]
+        local titlePart = (type(customStr) == "string" and customStr ~= "") and customStr or baseName
+        local fields = self.Flags["UI_WatermarkFields"]
+        local parts = { titlePart }
+        if type(fields) == "table" then
+            if fields["User"] ~= false then
+                table.insert(parts, LocalPlayer and LocalPlayer.Name or "user")
+            end
+            if fields["FPS"] ~= false then
+                table.insert(parts, string.format("%d fps", fps))
+            end
+            if fields["Ping"] ~= false then
+                table.insert(parts, string.format("%d ms", ping))
+            end
+            if fields["Time"] ~= false then
+                table.insert(parts, os.date("%H:%M:%S"))
+            end
+            if fields["Build"] == true then
+                table.insert(parts, "v" .. tostring(self.Version))
+            end
+        else
+            table.insert(parts, LocalPlayer and LocalPlayer.Name or "user")
+            table.insert(parts, string.format("%d fps", fps))
+            table.insert(parts, string.format("%d ms", ping))
+            table.insert(parts, os.date("%H:%M:%S"))
+        end
+        local str = table.concat(parts, " | ")
+        wmText.Text = str
+        local bgAlpha = tonumber(self.Flags["UI_WatermarkAlpha"]) or 0
+        wmFrame.BackgroundTransparency = math.clamp(bgAlpha, 0, 0.85)
+        local bounds = self:GetTextBounds(str, 12, Vector2.new(800, 24))
+        Library:Tween(wmFrame, TweenFast, {
+            Size = UDim2.fromOffset(bounds.X + 38, 24)
+        })
+    end
+
     self:Connect(RunService.RenderStepped, function(dt)
         frames += 1
         accum += dt
@@ -1089,33 +1141,24 @@ function Library:CreateWatermark(customTitle)
             fps = math.floor(frames / accum)
             frames = 0
             accum = 0
-            local ping = 0
-            pcall(function()
-                ping = math.floor( game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue() )
-            end)
-            local str = string.format("%s | %s | %d fps | %d ms | %s",
-                baseName,
-                LocalPlayer and LocalPlayer.Name or "user",
-                fps,
-                ping,
-                os.date("%H:%M:%S")
-            )
-            wmText.Text = str
-            local bounds = self:GetTextBounds(str, 12, Vector2.new(700, 24))
-            Library:Tween(wmFrame, TweenFast, {
-                Size = UDim2.fromOffset(bounds.X + 38, 24)
-            })
+            if wmFrame.Visible then
+                UpdateWatermarkText()
+            end
         end
     end)
 
-    local wmObj = { Frame = wmFrame }
+    local wmObj = { Frame = wmFrame, Refresh = UpdateWatermarkText }
     function wmObj:SetVisible(v)
         local state = (v == true)
         wmFrame.Visible = state
+        if state then
+            UpdateWatermarkText()
+        end
         Library:SyncOptionValue("UI_ShowWatermark", state)
     end
     function wmObj:SetTitle(newTitle)
         baseName = tostring(newTitle or Library.Title)
+        UpdateWatermarkText()
     end
     self.Watermark = wmObj
     return wmObj
@@ -1738,7 +1781,61 @@ function Library:CreateTargetHUD()
         local state = (v == true)
         hudFrame.Visible = state
         Library:SyncOptionValue("UI_ShowTargetHUD", state)
+        Library:SyncOptionValue("Misc_ShowTargetHUD", state)
     end
+
+    local targetTrackAccum = 0
+    self:Connect(RunService.RenderStepped, function(dt)
+        if not hudFrame.Visible or self.Unloaded then return end
+        targetTrackAccum += dt
+        if targetTrackAccum < 0.12 then return end
+        targetTrackAccum = 0
+        local targetName = self.Flags["Misc_PlayerTarget"]
+        local targetPlr = targetName and Players:FindFirstChild(tostring(targetName))
+        if not targetPlr and (self.Flags["Rage_Enabled"] or self.Flags["Legit_Enable"]) then
+            local cam = workspace.CurrentCamera
+            local mPos = UserInputService:GetMouseLocation()
+            local bestDist = math.huge
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if plr ~= LocalPlayer and plr.Character then
+                    local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+                    local hrp = plr.Character:FindFirstChild("HumanoidRootPart") or plr.Character.PrimaryPart
+                    if hum and hrp and hum.Health > 0 and cam then
+                        local sp, onScr = cam:WorldToViewportPoint(hrp.Position)
+                        if onScr and sp.Z > 0 then
+                            local d2 = (Vector2.new(sp.X, sp.Y) - mPos).Magnitude
+                            if d2 < bestDist then
+                                bestDist = d2
+                                targetPlr = plr
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        if targetPlr and targetPlr.Character then
+            local char = targetPlr.Character
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            if hum then
+                local dist = 0
+                pcall(function()
+                    if LocalPlayer and LocalPlayer.Character then
+                        dist = math.floor((LocalPlayer.Character:GetPivot().Position - char:GetPivot().Position).Magnitude)
+                    end
+                end)
+                local tool = char:FindFirstChildOfClass("Tool")
+                local flagStr = tool and string.upper(string.sub(tool.Name, 1, 7)) or (self.Flags["Rage_DT"] and "LC // DT" or "LOCKED")
+                hudObj:SetTarget({
+                    Name = targetPlr.Name,
+                    UserId = targetPlr.UserId,
+                    HP = math.floor(hum.Health + 0.5),
+                    MaxHP = math.floor(hum.MaxHealth + 0.5),
+                    Distance = dist,
+                    Flags = flagStr,
+                })
+            end
+        end
+    end)
 
     self.TargetHUD = hudObj
     return hudObj
@@ -1983,6 +2080,182 @@ function Library:CreateIndicators()
         Library:SyncOptionValue("Misc_ShowIndicators", state)
     end
 
+    -- Custom CS:GO / Gamesense Crosshair & Animated Hitmarker Overlay
+    local xhairRoot = self:Create("Frame", {
+        Name = "CustomCrosshair",
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundTransparency = 1,
+        Position = UDim2.fromScale(0.5, 0.5),
+        Size = UDim2.fromOffset(100, 100),
+        Visible = false,
+        ZIndex = 290,
+        Parent = ScreenGui,
+    })
+
+    local xhairDot = self:Create("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundColor3 = self.Theme.Accent,
+        BorderSizePixel = 0,
+        Position = UDim2.fromScale(0.5, 0.5),
+        Size = UDim2.fromOffset(2, 2),
+        ZIndex = 292,
+        Parent = xhairRoot,
+    })
+    local xhairDotStroke = self:Create("UIStroke", { Color = Color3.new(0, 0, 0), Thickness = 1, Parent = xhairDot })
+
+    local xhairArms = {}
+    for i = 1, 4 do
+        local arm = self:Create("Frame", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            BackgroundColor3 = self.Theme.Accent,
+            BorderSizePixel = 0,
+            Position = UDim2.fromScale(0.5, 0.5),
+            Size = UDim2.fromOffset(8, 2),
+            ZIndex = 291,
+            Parent = xhairRoot,
+        })
+        local st = self:Create("UIStroke", { Color = Color3.new(0, 0, 0), Thickness = 1, Parent = arm })
+        xhairArms[i] = { Frame = arm, Stroke = st }
+    end
+
+    -- Hitmarker X Overlay
+    local hitmarkerRoot = self:Create("Frame", {
+        Name = "HitmarkerOverlay",
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundTransparency = 1,
+        Position = UDim2.fromScale(0.5, 0.5),
+        Size = UDim2.fromOffset(32, 32),
+        Visible = false,
+        ZIndex = 295,
+        Parent = ScreenGui,
+    })
+    local hmLines = {}
+    local hmAngles = { 45, -45, 45, -45 }
+    local hmOffsets = {
+        Vector2.new(-6, -6),
+        Vector2.new(6, -6),
+        Vector2.new(6, 6),
+        Vector2.new(-6, 6),
+    }
+    for i = 1, 4 do
+        local ln = self:Create("Frame", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            BackgroundColor3 = Color3.new(1, 1, 1),
+            BorderSizePixel = 0,
+            Position = UDim2.new(0.5, hmOffsets[i].X, 0.5, hmOffsets[i].Y),
+            Rotation = hmAngles[i],
+            Size = UDim2.fromOffset(7, 1),
+            ZIndex = 296,
+            Parent = hitmarkerRoot,
+        })
+        self:Create("UIStroke", { Color = Color3.new(0, 0, 0), Thickness = 1, Transparency = 0.25, Parent = ln })
+        hmLines[i] = ln
+    end
+    local hmDmgLbl = self:Create("TextLabel", {
+        AnchorPoint = Vector2.new(0.5, 1),
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0.5, 0, 0, -4),
+        Size = UDim2.fromOffset(80, 14),
+        Font = Enum.Font.GothamBold,
+        Text = "-100",
+        TextColor3 = self.Theme.Risky,
+        TextSize = 12,
+        TextTransparency = 1,
+        ZIndex = 297,
+        Parent = hitmarkerRoot,
+    })
+
+    local hmToken = 0
+    function Library:FlashHitmarker(dmg, isHead)
+        if self.Flags["ESP_Hitmarker"] == false then return end
+        hmToken += 1
+        local tok = hmToken
+        local col = isHead and self.Theme.Risky or (self.Flags["ESP_CrosshairCol"] or self.Theme.Accent)
+        local mPos = UserInputService:GetMouseLocation()
+        local followMouse = (self.Flags["ESP_CrosshairFollow"] == true)
+        hitmarkerRoot.Position = followMouse and UDim2.fromOffset(mPos.X, mPos.Y) or UDim2.fromScale(0.5, 0.5)
+        hitmarkerRoot.Visible = true
+        for idx, ln in ipairs(hmLines) do
+            ln.BackgroundColor3 = col
+            ln.BackgroundTransparency = 0
+            ln.Position = UDim2.new(0.5, hmOffsets[idx].X * 1.35, 0.5, hmOffsets[idx].Y * 1.35)
+            self:Tween(ln, TweenFast, {
+                Position = UDim2.new(0.5, hmOffsets[idx].X, 0.5, hmOffsets[idx].Y),
+            })
+        end
+        hmDmgLbl.Text = "-" .. tostring(dmg or 100) .. (isHead and " HS" or "")
+        hmDmgLbl.TextColor3 = col
+        hmDmgLbl.Position = UDim2.new(0.5, 0, 0, -2)
+        hmDmgLbl.TextTransparency = 0
+        self:Tween(hmDmgLbl, TweenMedium, {
+            Position = UDim2.new(0.5, 0, 0, -16),
+            TextTransparency = 1,
+        })
+        task.delay(0.28, function()
+            if hmToken ~= tok then return end
+            for _, ln in ipairs(hmLines) do
+                self:Tween(ln, TweenFast, { BackgroundTransparency = 1 })
+            end
+            task.wait(0.15)
+            if hmToken == tok then
+                hitmarkerRoot.Visible = false
+            end
+        end)
+    end
+
+    local xhairSpinAngle = 0
+    self:Connect(RunService.RenderStepped, function(dt)
+        if self.Unloaded then return end
+        local F = self.Flags
+        local showXhair = (F["ESP_Crosshair"] == true)
+        xhairRoot.Visible = showXhair
+        if showXhair then
+            local col = F["ESP_CrosshairCol"] or self.Theme.Accent
+            local length = math.clamp(tonumber(F["ESP_CrosshairLen"]) or 8, 2, 30)
+            local gap = math.clamp(tonumber(F["ESP_CrosshairGap"]) or 5, 0, 25)
+            local thick = math.clamp(tonumber(F["ESP_CrosshairThick"]) or 2, 1, 6)
+            local tStyle = (F["ESP_CrosshairT"] == true)
+            local showDot = (F["ESP_CrosshairDot"] ~= false)
+            local spin = (F["ESP_CrosshairSpin"] == true)
+            local followMouse = (F["ESP_CrosshairFollow"] == true)
+
+            if followMouse then
+                local mPos = UserInputService:GetMouseLocation()
+                xhairRoot.Position = UDim2.fromOffset(mPos.X, mPos.Y)
+            else
+                xhairRoot.Position = UDim2.fromScale(0.5, 0.5)
+            end
+
+            if spin then
+                xhairSpinAngle = (xhairSpinAngle + dt * 140) % 360
+                xhairRoot.Rotation = xhairSpinAngle
+            else
+                xhairRoot.Rotation = 0
+            end
+
+            xhairDot.Visible = showDot
+            xhairDot.BackgroundColor3 = col
+            xhairDot.Size = UDim2.fromOffset(thick, thick)
+            xhairDotStroke.Transparency = 0.15
+
+            local centerDist = gap + length * 0.5
+            -- 1: Left, 2: Right, 3: Top, 4: Bottom
+            xhairArms[1].Frame.Position = UDim2.new(0.5, -centerDist, 0.5, 0)
+            xhairArms[1].Frame.Size = UDim2.fromOffset(length, thick)
+            xhairArms[2].Frame.Position = UDim2.new(0.5, centerDist, 0.5, 0)
+            xhairArms[2].Frame.Size = UDim2.fromOffset(length, thick)
+            xhairArms[3].Frame.Position = UDim2.new(0.5, 0, 0.5, -centerDist)
+            xhairArms[3].Frame.Size = UDim2.fromOffset(thick, length)
+            xhairArms[3].Frame.Visible = not tStyle
+            xhairArms[4].Frame.Position = UDim2.new(0.5, 0, 0.5, centerDist)
+            xhairArms[4].Frame.Size = UDim2.fromOffset(thick, length)
+
+            for i = 1, 4 do
+                xhairArms[i].Frame.BackgroundColor3 = col
+            end
+        end
+    end)
+
     indObj:Refresh()
     self.Indicators = indObj
     return indObj
@@ -2078,20 +2351,61 @@ function Library:CreateRadar(cfg)
         self:Create("UIStroke", { Color = Color3.fromRGB(26, 26, 34), Thickness = 1, Parent = ring })
     end
 
-    -- Cardinal N Label
-    local northLbl = self:Create("TextLabel", {
-        AnchorPoint = Vector2.new(0.5, 0),
-        BackgroundTransparency = 1,
-        Position = UDim2.new(0.5, 0, 0, 2),
-        Size = UDim2.fromOffset(16, 12),
-        Font = Enum.Font.GothamBold,
-        Text = "N",
-        TextColor3 = self.Theme.Accent,
-        TextSize = 9,
-        ZIndex = 263,
+    -- FOV Cone Wedge Lines (Camera Look Direction Cone)
+    local fovLeftArm = self:Create("Frame", {
+        AnchorPoint = Vector2.new(0.5, 1),
+        BackgroundColor3 = self.Theme.Accent,
+        BackgroundTransparency = 0.55,
+        BorderSizePixel = 0,
+        Position = UDim2.fromScale(0.5, 0.5),
+        Rotation = -38,
+        Size = UDim2.new(0, 1, 0.48, 0),
+        ZIndex = 262,
         Parent = canvas,
     })
-    self:BindTheme(northLbl, "TextColor3", "Accent")
+    self:BindTheme(fovLeftArm, "BackgroundColor3", "Accent")
+
+    local fovRightArm = self:Create("Frame", {
+        AnchorPoint = Vector2.new(0.5, 1),
+        BackgroundColor3 = self.Theme.Accent,
+        BackgroundTransparency = 0.55,
+        BorderSizePixel = 0,
+        Position = UDim2.fromScale(0.5, 0.5),
+        Rotation = 38,
+        Size = UDim2.new(0, 1, 0.48, 0),
+        ZIndex = 262,
+        Parent = canvas,
+    })
+    self:BindTheme(fovRightArm, "BackgroundColor3", "Accent")
+
+    -- Rotating Cardinal Labels (N, E, S, W)
+    local cardinals = {}
+    local cardinalDefs = {
+        { Text = "N", Dir = Vector3.new(0, 0, -1), Accent = true },
+        { Text = "E", Dir = Vector3.new(1, 0, 0),  Accent = false },
+        { Text = "S", Dir = Vector3.new(0, 0, 1),  Accent = false },
+        { Text = "W", Dir = Vector3.new(-1, 0, 0), Accent = false },
+    }
+    for _, cDef in ipairs(cardinalDefs) do
+        local cLbl = self:Create("TextLabel", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0.5, 0, 0, 8),
+            Size = UDim2.fromOffset(14, 12),
+            Font = Enum.Font.GothamBold,
+            Text = cDef.Text,
+            TextColor3 = cDef.Accent and self.Theme.Accent or self.Theme.TextMuted,
+            TextSize = 9,
+            ZIndex = 263,
+            Parent = canvas,
+        })
+        if cDef.Accent then
+            self:BindTheme(cLbl, "TextColor3", "Accent")
+        else
+            self:BindTheme(cLbl, "TextColor3", "TextMuted")
+        end
+        table.insert(cardinals, { Label = cLbl, Dir = cDef.Dir })
+    end
 
     -- Center LocalPlayer Arrow / Dot
     local selfDot = self:Create("Frame", {
@@ -2150,23 +2464,54 @@ function Library:CreateRadar(cfg)
     self:Connect(RunService.RenderStepped, function()
         if not radarFrame.Visible or self.Unloaded then return end
         local cam = workspace.CurrentCamera
+        local northLocked = (self.Flags["Misc_RadarMode"] == "North-Locked")
+        local blipScale = math.clamp(tonumber(self.Flags["Misc_RadarBlipSize"]) or 5, 3, 10)
+        local showCone = (self.Flags["Misc_RadarCone"] ~= false)
+        local bgAlpha = math.clamp(tonumber(self.Flags["Misc_RadarAlpha"]) or 0.05, 0, 0.85)
+        radarFrame.BackgroundTransparency = bgAlpha
+        canvas.BackgroundTransparency = bgAlpha * 0.8
+
         local cSize = canvas.AbsoluteSize
-        local halfW = math.max(20, cSize.X * 0.5 - 6)
-        local halfH = math.max(20, cSize.Y * 0.5 - 6)
+        local halfW = math.max(20, cSize.X * 0.5 - 8)
+        local halfH = math.max(20, cSize.Y * 0.5 - 8)
 
         local myPos = Vector3.zero
         local camLook = Vector3.new(0, 0, -1)
         local camRight = Vector3.new(1, 0, 0)
+        local halfFovDeg = 35
         if cam then
             camLook = Vector3.new(cam.CFrame.LookVector.X, 0, cam.CFrame.LookVector.Z)
             if camLook.Magnitude > 0.001 then camLook = camLook.Unit else camLook = Vector3.new(0, 0, -1) end
             camRight = Vector3.new(cam.CFrame.RightVector.X, 0, cam.CFrame.RightVector.Z)
             if camRight.Magnitude > 0.001 then camRight = camRight.Unit else camRight = Vector3.new(1, 0, 0) end
             myPos = cam.CFrame.Position
+            halfFovDeg = math.clamp(cam.FieldOfView * 0.5, 20, 65)
         end
         if LocalPlayer and LocalPlayer.Character then
             local ok, piv = pcall(function() return LocalPlayer.Character:GetPivot().Position end)
             if ok and piv then myPos = piv end
+        end
+
+        local refRight = northLocked and Vector3.new(1, 0, 0) or camRight
+        local refLook = northLocked and Vector3.new(0, 0, -1) or camLook
+
+        -- Update FOV Cone arms
+        fovLeftArm.Visible = showCone
+        fovRightArm.Visible = showCone
+        if showCone then
+            local yawDeg = 0
+            if northLocked then
+                yawDeg = math.deg(math.atan2(camLook.X, -camLook.Z))
+            end
+            fovLeftArm.Rotation = yawDeg - halfFovDeg
+            fovRightArm.Rotation = yawDeg + halfFovDeg
+        end
+
+        -- Update Cardinal Directions around radar perimeter
+        for _, cEntry in ipairs(cardinals) do
+            local cx = cEntry.Dir:Dot(refRight)
+            local cy = -cEntry.Dir:Dot(refLook)
+            cEntry.Label.Position = UDim2.new(0.5, math.floor(cx * (halfW - 2) + 0.5), 0.5, math.floor(cy * (halfH - 2) + 0.5))
         end
 
         local activeKeys = {}
@@ -2180,8 +2525,8 @@ function Library:CreateRadar(cfg)
                         otherCount += 1
                         activeKeys[plr.Name] = true
                         local delta = tPos - myPos
-                        local rx = delta:Dot(camRight) / radarRange
-                        local ry = -delta:Dot(camLook) / radarRange
+                        local rx = delta:Dot(refRight) / radarRange
+                        local ry = -delta:Dot(refLook) / radarRange
                         local mag = math.sqrt(rx * rx + ry * ry)
                         if mag > 1 then
                             rx = rx / mag
@@ -2189,8 +2534,10 @@ function Library:CreateRadar(cfg)
                         end
                         local b = GetOrMakeBlip(plr.Name)
                         local isSelected = (Library.Flags["Misc_PlayerTarget"] == plr.Name)
+                        local isTeammate = (LocalPlayer and plr.Team ~= nil and plr.Team == LocalPlayer.Team)
+                        b.Dot.Size = UDim2.fromOffset(blipScale, blipScale)
                         b.Dot.Position = UDim2.new(0.5, math.floor(rx * halfW + 0.5), 0.5, math.floor(ry * halfH + 0.5))
-                        b.Dot.BackgroundColor3 = isSelected and self.Theme.Accent or self.Theme.Risky
+                        b.Dot.BackgroundColor3 = isSelected and self.Theme.Accent or (isTeammate and self.Theme.Success or self.Theme.Risky)
                         b.Tag.Text = plr.Name
                     end
                 end
@@ -2206,9 +2553,11 @@ function Library:CreateRadar(cfg)
                 local ang = t + idx * 1.7
                 local ox = d.Offset.X + math.cos(ang) * 10
                 local oy = d.Offset.Y + math.sin(ang) * 10
-                local rx = math.clamp(ox / (radarRange * 0.5), -0.92, 0.92)
-                local ry = math.clamp(oy / (radarRange * 0.5), -0.92, 0.92)
+                local worldDelta = Vector3.new(ox, 0, oy)
+                local rx = math.clamp(worldDelta:Dot(refRight) / (radarRange * 0.5), -0.92, 0.92)
+                local ry = math.clamp(-worldDelta:Dot(refLook) / (radarRange * 0.5), -0.92, 0.92)
                 local b = GetOrMakeBlip(key)
+                b.Dot.Size = UDim2.fromOffset(blipScale, blipScale)
                 b.Dot.Position = UDim2.new(0.5, math.floor(rx * halfW + 0.5), 0.5, math.floor(ry * halfH + 0.5))
                 b.Dot.BackgroundColor3 = d.Enemy and self.Theme.Risky or self.Theme.Accent
                 b.Tag.Text = d.Name
@@ -2233,6 +2582,10 @@ function Library:CreateRadar(cfg)
     function radarObj:SetRange(studs)
         radarRange = math.max(25, tonumber(studs) or 180)
     end
+    function radarObj:SetSize(px)
+        radarSize = math.clamp(tonumber(px) or 170, 120, 320)
+        Library:Tween(radarFrame, TweenFast, { Size = UDim2.fromOffset(radarSize, radarSize + 24) })
+    end
     self.Radar = radarObj
     return radarObj
 end
@@ -2248,10 +2601,11 @@ function Library:CreateWorldController()
         Parent = ScreenGui,
     })
 
-    -- Center FOV Circle
+    -- Center / Cursor FOV Circle + Optional Fill & Inner Deadzone Ring
     local fovCircle = self:Create("Frame", {
         Name = "FOVCircle",
         AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundColor3 = self.Theme.Accent,
         BackgroundTransparency = 1,
         Position = UDim2.fromScale(0.5, 0.5),
         Size = UDim2.fromOffset(180, 180),
@@ -2273,18 +2627,171 @@ function Library:CreateWorldController()
     })
     self:BindTheme(fovStroke, "Color", "Accent")
 
+    local deadzoneCircle = self:Create("Frame", {
+        Name = "DeadzoneCircle",
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundTransparency = 1,
+        Position = UDim2.fromScale(0.5, 0.5),
+        Size = UDim2.fromOffset(30, 30),
+        Visible = false,
+        ZIndex = 50,
+        Parent = overlayFolder,
+    })
+    self:Create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = deadzoneCircle })
+    local dzStroke = self:Create("UIStroke", {
+        Color = self.Theme.Risky,
+        Thickness = 1,
+        Transparency = 0.25,
+        Parent = deadzoneCircle,
+    })
+
     local lighting = game:GetService("Lighting")
     local origAmbient = lighting.Ambient
     local origOutdoor = lighting.OutdoorAmbient
     local origExposure = lighting.ExposureCompensation
+    local origClockTime = lighting.ClockTime
+    local origBrightness = lighting.Brightness
+    local origFogStart = lighting.FogStart
+    local origFogEnd = lighting.FogEnd
+    local origFogColor = lighting.FogColor
+    local origGlobalShadows = lighting.GlobalShadows
     local nightApplied = false
+    local clockApplied = false
+    local fogApplied = false
+    local fullbrightApplied = false
+    local fovApplied = false
+    local origCamFov = workspace.CurrentCamera and workspace.CurrentCamera.FieldOfView or 70
     local tpApplied = false
     local origMinZoom = LocalPlayer and LocalPlayer.CameraMinZoomDistance or 0.5
     local origMaxZoom = LocalPlayer and LocalPlayer.CameraMaxZoomDistance or 128
+    local speedApplied = false
+    local jumpApplied = false
+    local noclipApplied = false
+    local noclipParts = {}
+    local disabledPostEffects = {}
+
+    local ccEffect = Instance.new("ColorCorrectionEffect")
+    ccEffect.Name = "ShardsColorCorrection"
+    ccEffect.Enabled = false
+    pcall(function() ccEffect.Parent = lighting end)
+
+    local beamFolder = Instance.new("Folder")
+    beamFolder.Name = "ShardsBulletBeams"
+    pcall(function() beamFolder.Parent = workspace end)
 
     local cards = {}
     local trackedHealth = {}
     local playerConns = {}
+
+    local function SpawnTracer(targetNameOrPos)
+        if not self.Flags["World_Beams"] or self.Unloaded then return end
+        local cam = workspace.CurrentCamera
+        if not cam then return end
+        local startPos = cam.CFrame.Position - Vector3.new(0, 0.4, 0)
+        if LocalPlayer and LocalPlayer.Character then
+            local head = LocalPlayer.Character:FindFirstChild("Head") or LocalPlayer.Character.PrimaryPart
+            if head then
+                startPos = head.Position
+            end
+        end
+
+        local endPos
+        if typeof(targetNameOrPos) == "Vector3" then
+            endPos = targetNameOrPos
+        elseif type(targetNameOrPos) == "string" then
+            local tPlr = Players:FindFirstChild(targetNameOrPos)
+            if tPlr and tPlr.Character then
+                local tPart = tPlr.Character:FindFirstChild("Head") or tPlr.Character:FindFirstChild("HumanoidRootPart") or tPlr.Character.PrimaryPart
+                if tPart then
+                    endPos = tPart.Position
+                end
+            end
+        end
+        if not endPos then
+            endPos = startPos + cam.CFrame.LookVector * 55 + Vector3.new(math.random(-20, 20) * 0.1, math.random(-10, 10) * 0.1, 0)
+        end
+
+        local dist = (endPos - startPos).Magnitude
+        if dist < 0.5 then return end
+        local beamCol = self.Flags["World_BeamCol"] or self.Theme.Accent
+        local dur = math.clamp(tonumber(self.Flags["World_BeamTime"]) or 1.2, 0.2, 5)
+        local thick = math.clamp(tonumber(self.Flags["World_BeamThick"]) or 0.12, 0.04, 0.5)
+
+        local part = Instance.new("Part")
+        part.Name = "ShardsBeam"
+        part.Anchored = true
+        part.CanCollide = false
+        part.CanQuery = false
+        part.CanTouch = false
+        part.CastShadow = false
+        part.Material = Enum.Material.Neon
+        part.Color = beamCol
+        part.Transparency = 0.1
+        part.Size = Vector3.new(thick, thick, dist)
+        part.CFrame = CFrame.lookAt(startPos:Lerp(endPos, 0.5), endPos)
+        part.Parent = beamFolder
+
+        local impact = Instance.new("Part")
+        impact.Name = "ShardsImpact"
+        impact.Anchored = true
+        impact.CanCollide = false
+        impact.CanQuery = false
+        impact.CanTouch = false
+        impact.CastShadow = false
+        impact.Material = Enum.Material.Neon
+        impact.Color = beamCol
+        impact.Transparency = 0.05
+        impact.Size = Vector3.new(thick * 3.2, thick * 3.2, thick * 3.2)
+        impact.Position = endPos
+        impact.Parent = beamFolder
+
+        self:Tween(part, TweenInfo.new(dur, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            Transparency = 1,
+            Size = Vector3.new(0.01, 0.01, dist),
+        })
+        self:Tween(impact, TweenInfo.new(dur, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            Transparency = 1,
+            Size = Vector3.new(0.02, 0.02, 0.02),
+        })
+        task.delay(dur + 0.05, function()
+            if part and part.Parent then part:Destroy() end
+            if impact and impact.Parent then impact:Destroy() end
+        end)
+    end
+
+    local function MakeCornerSet(parent, zIndex)
+        local corners = {}
+        -- 8 segments (2 per corner: horizontal + vertical)
+        local defs = {
+            -- Top-Left
+            { AX = 0, AY = 0, PX = 0, PY = 0, Horiz = true },
+            { AX = 0, AY = 0, PX = 0, PY = 0, Horiz = false },
+            -- Top-Right
+            { AX = 1, AY = 0, PX = 1, PY = 0, Horiz = true },
+            { AX = 1, AY = 0, PX = 1, PY = 0, Horiz = false },
+            -- Bottom-Left
+            { AX = 0, AY = 1, PX = 0, PY = 1, Horiz = true },
+            { AX = 0, AY = 1, PX = 0, PY = 1, Horiz = false },
+            -- Bottom-Right
+            { AX = 1, AY = 1, PX = 1, PY = 1, Horiz = true },
+            { AX = 1, AY = 1, PX = 1, PY = 1, Horiz = false },
+        }
+        for _, d in ipairs(defs) do
+            local seg = self:Create("Frame", {
+                AnchorPoint = Vector2.new(d.AX, d.AY),
+                BackgroundColor3 = self.Theme.Accent,
+                BorderSizePixel = 0,
+                Position = UDim2.fromScale(d.PX, d.PY),
+                Size = d.Horiz and UDim2.new(0.28, 0, 0, 1) or UDim2.new(0, 1, 0.25, 0),
+                Visible = false,
+                ZIndex = zIndex,
+                Parent = parent,
+            })
+            self:Create("UIStroke", { Color = Color3.new(0, 0, 0), Thickness = 1, Transparency = 0.25, Parent = seg })
+            table.insert(corners, seg)
+        end
+        return corners
+    end
 
     local function GetOrMakeCard(plr)
         local c = cards[plr]
@@ -2296,6 +2803,16 @@ function Library:CreateWorldController()
             Visible = false,
             ZIndex = 55,
             Parent = overlayFolder,
+        })
+
+        local boxFill = self:Create("Frame", {
+            BackgroundColor3 = self.Theme.Accent,
+            BackgroundTransparency = 0.82,
+            BorderSizePixel = 0,
+            Size = UDim2.fromScale(1, 1),
+            Visible = false,
+            ZIndex = 55,
+            Parent = root,
         })
 
         local box = self:Create("Frame", {
@@ -2315,6 +2832,21 @@ function Library:CreateWorldController()
             Thickness = 1,
             Parent = box,
         })
+
+        local cornerSegments = MakeCornerSet(root, 57)
+
+        local headDot = self:Create("Frame", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            BackgroundColor3 = self.Theme.Accent,
+            BorderSizePixel = 0,
+            Position = UDim2.new(0.5, 0, 0.12, 0),
+            Size = UDim2.fromOffset(4, 4),
+            Visible = false,
+            ZIndex = 58,
+            Parent = root,
+        })
+        self:Create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = headDot })
+        self:Create("UIStroke", { Color = Color3.new(0, 0, 0), Thickness = 1, Parent = headDot })
 
         local nameLbl = self:Create("TextLabel", {
             AnchorPoint = Vector2.new(0.5, 1),
@@ -2360,15 +2892,112 @@ function Library:CreateWorldController()
             ZIndex = 57,
             Parent = hpBg,
         })
+        local hpText = self:Create("TextLabel", {
+            AnchorPoint = Vector2.new(1, 0.5),
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0, -2, 0, 0),
+            Size = UDim2.fromOffset(32, 10),
+            Font = Enum.Font.GothamBold,
+            Text = "100",
+            TextColor3 = Color3.new(1, 1, 1),
+            TextSize = 9,
+            TextXAlignment = Enum.TextXAlignment.Right,
+            Visible = false,
+            ZIndex = 58,
+            Parent = hpBg,
+        })
+
+        -- Right Side Live ESP Flags Stack
+        local flagsCol = self:Create("Frame", {
+            BackgroundTransparency = 1,
+            Position = UDim2.new(1, 4, 0, 0),
+            Size = UDim2.fromOffset(48, 120),
+            ZIndex = 57,
+            Parent = root,
+        })
+        self:Create("UIListLayout", {
+            Padding = UDim.new(0, 1),
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            Parent = flagsCol,
+        })
+        local flagDefs = {
+            { Key = "Armor (HK)",   Text = "HK",    Color = Color3.fromRGB(230, 230, 235) },
+            { Key = "Scoped",       Text = "ZOOM",  Color = Color3.fromRGB(85, 190, 255)  },
+            { Key = "Flashed",      Text = "FLASH", Color = Color3.fromRGB(245, 205, 75)  },
+            { Key = "Exploit / LC", Text = "LC",    Color = Color3.fromRGB(235, 75, 75)   },
+            { Key = "Ping",         Text = "24MS",  Color = Color3.fromRGB(145, 220, 110) },
+            { Key = "Distance",     Text = "0FT",   Color = Color3.fromRGB(185, 185, 195) },
+        }
+        local flagLabels = {}
+        for idx, fd in ipairs(flagDefs) do
+            local fl = self:Create("TextLabel", {
+                BackgroundTransparency = 1,
+                LayoutOrder = idx,
+                Size = UDim2.new(1, 0, 0, 10),
+                Font = Enum.Font.GothamBold,
+                Text = fd.Text,
+                TextColor3 = fd.Color,
+                TextSize = 9,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                Visible = false,
+                ZIndex = 58,
+                Parent = flagsCol,
+            })
+            flagLabels[fd.Key] = fl
+        end
+
+        -- 2D Snapline / Tracer Line
+        local tracerLine = self:Create("Frame", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            BackgroundColor3 = self.Theme.Accent,
+            BorderSizePixel = 0,
+            Visible = false,
+            ZIndex = 52,
+            Parent = overlayFolder,
+        })
+        self:Create("UIStroke", { Color = Color3.new(0, 0, 0), Thickness = 1, Transparency = 0.35, Parent = tracerLine })
+
+        -- Off-Screen Directional Indicator Arrow
+        local oofArrow = self:Create("Frame", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            BackgroundColor3 = self.Theme.Risky,
+            BorderSizePixel = 0,
+            Size = UDim2.fromOffset(10, 10),
+            Visible = false,
+            ZIndex = 54,
+            Parent = overlayFolder,
+        })
+        self:Create("UICorner", { CornerRadius = UDim.new(0, 2), Parent = oofArrow })
+        self:Create("UIStroke", { Color = Color3.new(0, 0, 0), Thickness = 1, Parent = oofArrow })
+        local oofTag = self:Create("TextLabel", {
+            AnchorPoint = Vector2.new(0.5, 0),
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0.5, 0, 1, 2),
+            Size = UDim2.fromOffset(65, 10),
+            Font = Enum.Font.Code,
+            Text = plr.Name,
+            TextColor3 = self.Theme.Text,
+            TextSize = 9,
+            ZIndex = 55,
+            Parent = oofArrow,
+        })
 
         c = {
             Root = root,
             Box = box,
+            BoxFill = boxFill,
             BoxStroke = boxStroke,
+            Corners = cornerSegments,
+            HeadDot = headDot,
             Name = nameLbl,
             Dist = distLbl,
             HpBg = hpBg,
             HpFill = hpFill,
+            HpText = hpText,
+            FlagLabels = flagLabels,
+            Tracer = tracerLine,
+            OOFArrow = oofArrow,
+            OOFTag = oofTag,
             Highlight = nil,
         }
         cards[plr] = c
@@ -2448,41 +3077,180 @@ function Library:CreateWorldController()
         local c = cards[plr]
         if c then
             if c.Root then c.Root:Destroy() end
+            if c.Tracer then c.Tracer:Destroy() end
+            if c.OOFArrow then c.OOFArrow:Destroy() end
             if c.Highlight then pcall(function() c.Highlight:Destroy() end) end
             cards[plr] = nil
         end
         trackedHealth[plr] = nil
     end)
 
-    self:Connect(RunService.RenderStepped, function()
+    -- Infinite Jump Listener
+    self:Connect(UserInputService.JumpRequest, function()
+        if self.Unloaded or not self.Flags["Misc_InfJump"] then return end
+        local myChar = LocalPlayer and LocalPlayer.Character
+        local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
+        if myHum then
+            myHum:ChangeState(Enum.HumanoidStateType.Jumping)
+        end
+    end)
+
+    -- Noclip Stepped Loop
+    self:Connect(RunService.Stepped, function()
+        if self.Unloaded then return end
+        local myChar = LocalPlayer and LocalPlayer.Character
+        if self.Flags["Misc_Noclip"] and myChar then
+            noclipApplied = true
+            for _, part in ipairs(myChar:GetDescendants()) do
+                if part:IsA("BasePart") and part.CanCollide then
+                    noclipParts[part] = true
+                    part.CanCollide = false
+                end
+            end
+        elseif noclipApplied then
+            noclipApplied = false
+            for part in pairs(noclipParts) do
+                if part and part.Parent then
+                    pcall(function() part.CanCollide = true end)
+                end
+            end
+            table.clear(noclipParts)
+        end
+    end)
+
+    self:Connect(RunService.RenderStepped, function(dt)
         if self.Unloaded then return end
         local F = self.Flags
         local cam = workspace.CurrentCamera
         if not cam then return end
+        local vp = cam.ViewportSize
+        local mPos = UserInputService:GetMouseLocation()
 
-        -- 1) FOV Circle (ScreenGui has IgnoreGuiInset = true, so GetMouseLocation() is already in ScreenGui space)
-        local showFov = (F["Rage_Enabled"] == true) or (F["Legit_Enable"] == true)
+        -- 1) FOV Circle & Deadzone Circle
+        local showFov = (F["ESP_ShowFOV"] == true) or (F["Rage_Enabled"] == true) or (F["Legit_Enable"] == true)
         fovCircle.Visible = showFov
         if showFov then
-            local mPos = UserInputService:GetMouseLocation()
             local radius = F["Legit_Enable"] and ((tonumber(F["Legit_FOV"]) or 4.5) * 12) or ((tonumber(F["Rage_FOV"]) or 90) * 1.6)
-            local d = math.clamp(radius * 2, 24, 700)
-            fovCircle.Position = UDim2.fromOffset(mPos.X, mPos.Y)
+            local d = math.clamp(radius * 2, 24, 750)
+            local centerMode = (F["ESP_FOVOrigin"] == "Screen Center")
+            local pos = centerMode and UDim2.fromOffset(vp.X * 0.5, vp.Y * 0.5) or UDim2.fromOffset(mPos.X, mPos.Y)
+            local col = F["ESP_FOVColor"] or self.Theme.Accent
+            fovCircle.Position = pos
             fovCircle.Size = UDim2.fromOffset(d, d)
+            fovStroke.Color = col
+            fovCircle.BackgroundColor3 = col
+            fovCircle.BackgroundTransparency = (F["ESP_FOVFilled"] == true) and math.clamp(1 - (tonumber(F["ESP_FOVAlpha"]) or 0.15), 0.4, 0.96) or 1
+
+            local dzRadius = tonumber(F["Legit_Deadzone"]) or 0
+            if F["Legit_Enable"] and dzRadius > 0 then
+                deadzoneCircle.Visible = true
+                deadzoneCircle.Position = pos
+                deadzoneCircle.Size = UDim2.fromOffset(dzRadius * 16, dzRadius * 16)
+            else
+                deadzoneCircle.Visible = false
+            end
+        else
+            deadzoneCircle.Visible = false
         end
 
-        -- 2) World Nightmode & Thirdperson Camera Overrides
-        if F["World_Night"] then
+        -- 2) World Nightmode, Time of Day, Fog, Fullbright, ColorCorrection & Visual Removals
+        local removals = type(F["World_Removals"]) == "table" and F["World_Removals"] or {}
+        if F["World_Fullbright"] then
+            fullbrightApplied = true
+            lighting.Ambient = Color3.new(1, 1, 1)
+            lighting.OutdoorAmbient = Color3.new(1, 1, 1)
+            lighting.Brightness = 2.5
+            lighting.GlobalShadows = false
+        elseif F["World_Night"] then
             nightApplied = true
             local tint = F["World_Color"] or Color3.fromRGB(28, 28, 38)
             lighting.Ambient = tint
             lighting.OutdoorAmbient = tint
             lighting.ExposureCompensation = tonumber(F["World_Exposure"]) or -1.2
-        elseif nightApplied then
-            nightApplied = false
-            lighting.Ambient = origAmbient
-            lighting.OutdoorAmbient = origOutdoor
-            lighting.ExposureCompensation = origExposure
+            if fullbrightApplied then
+                fullbrightApplied = false
+                lighting.Brightness = origBrightness
+                lighting.GlobalShadows = origGlobalShadows
+            end
+        else
+            if nightApplied or fullbrightApplied then
+                nightApplied = false
+                fullbrightApplied = false
+                lighting.Ambient = origAmbient
+                lighting.OutdoorAmbient = origOutdoor
+                lighting.ExposureCompensation = origExposure
+                lighting.Brightness = origBrightness
+                lighting.GlobalShadows = origGlobalShadows
+            end
+        end
+
+        if F["World_Clock_Enabled"] then
+            clockApplied = true
+            lighting.ClockTime = math.clamp(tonumber(F["World_ClockTime"]) or 0, 0, 24)
+        elseif clockApplied then
+            clockApplied = false
+            lighting.ClockTime = origClockTime
+        end
+
+        if removals["Fog"] then
+            fogApplied = true
+            lighting.FogStart = 100000
+            lighting.FogEnd = 100000
+        elseif F["World_Fog_Enabled"] then
+            fogApplied = true
+            lighting.FogStart = 15
+            lighting.FogEnd = math.clamp(tonumber(F["World_FogEnd"]) or 350, 30, 2500)
+            lighting.FogColor = F["World_FogCol"] or self.Theme.Accent
+        elseif fogApplied then
+            fogApplied = false
+            lighting.FogStart = origFogStart
+            lighting.FogEnd = origFogEnd
+            lighting.FogColor = origFogColor
+        end
+
+        if removals["Post Processing"] then
+            for _, eff in ipairs(lighting:GetChildren()) do
+                if eff ~= ccEffect and eff:IsA("PostEffect") and eff.Enabled then
+                    disabledPostEffects[eff] = true
+                    eff.Enabled = false
+                end
+            end
+        elseif next(disabledPostEffects) ~= nil then
+            for eff in pairs(disabledPostEffects) do
+                if eff and eff.Parent then
+                    pcall(function() eff.Enabled = true end)
+                end
+            end
+            table.clear(disabledPostEffects)
+        end
+
+        if ccEffect and ccEffect.Parent then
+            if F["World_CC_Enabled"] then
+                ccEffect.Enabled = true
+                ccEffect.Saturation = math.clamp(tonumber(F["World_Saturation"]) or 0.35, -1, 2)
+                ccEffect.Contrast = math.clamp(tonumber(F["World_Contrast"]) or 0.15, -1, 2)
+                ccEffect.TintColor = F["World_CCTint"] or Color3.new(1, 1, 1)
+            else
+                ccEffect.Enabled = false
+            end
+        end
+
+        -- Camera FOV, Aspect Ratio Stretch & Thirdperson
+        if F["World_FOV_Enabled"] then
+            if not fovApplied then
+                origCamFov = cam.FieldOfView
+                fovApplied = true
+            end
+            cam.FieldOfView = math.clamp(tonumber(F["World_FOV"]) or 105, 40, 135)
+        elseif fovApplied then
+            fovApplied = false
+            cam.FieldOfView = origCamFov
+        end
+
+        if F["World_Aspect_Enabled"] then
+            local ratio = math.clamp(tonumber(F["World_Aspect"]) or 0.78, 0.45, 1.5)
+            local x, y, z, r00, r01, r02, r10, r11, r12, r20, r21, r22 = cam.CFrame:GetComponents()
+            cam.CFrame = CFrame.new(x, y, z, r00, r01 * ratio, r02, r10, r11 * ratio, r12, r20, r21 * ratio, r22)
         end
 
         if LocalPlayer then
@@ -2502,46 +3270,224 @@ function Library:CreateWorldController()
             end
         end
 
-        -- 3) 2D Player Overlays & Chams Highlights
-        local anyESP = F["ESP_Box"] or F["ESP_Name"] or F["ESP_Health"] or F["ESP_Weapon"] or F["ESP_Glow"] or F["Chams_Vis"] or F["Chams_XQZ"]
+        -- 3) LocalPlayer Movement Controller (WalkSpeed, JumpPower, Bhop, Air Strafe, Fast Stop)
+        local myChar = LocalPlayer and LocalPlayer.Character
+        local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
+        local myHrp = myChar and (myChar:FindFirstChild("HumanoidRootPart") or myChar.PrimaryPart)
+        if myHum and myHrp then
+            if F["Misc_Speed_Enabled"] then
+                speedApplied = true
+                myHum.WalkSpeed = math.clamp(tonumber(F["Misc_Speed"]) or 28, 16, 150)
+            elseif speedApplied then
+                speedApplied = false
+                myHum.WalkSpeed = 16
+            end
+
+            if F["Misc_Jump_Enabled"] then
+                jumpApplied = true
+                myHum.UseJumpPower = true
+                myHum.JumpPower = math.clamp(tonumber(F["Misc_Jump"]) or 65, 50, 200)
+            elseif jumpApplied then
+                jumpApplied = false
+                myHum.JumpPower = 50
+            end
+
+            local moveDir = myHum.MoveDirection
+            local onGround = (myHum.FloorMaterial ~= Enum.Material.Air)
+
+            if F["Misc_Bhop"] and moveDir.Magnitude > 0.05 then
+                if onGround then
+                    myHum.Jump = true
+                else
+                    local boost = math.clamp(tonumber(F["Misc_BhopSpeed"]) or 24, 0, 120)
+                    if boost > 0 then
+                        local vel = myHrp.AssemblyLinearVelocity
+                        myHrp.AssemblyLinearVelocity = Vector3.new(
+                            vel.X + moveDir.X * boost * dt * 2.4,
+                            vel.Y,
+                            vel.Z + moveDir.Z * boost * dt * 2.4
+                        )
+                    end
+                end
+            end
+
+            if F["Misc_Strafe"] and not onGround and moveDir.Magnitude > 0.05 then
+                local vel = myHrp.AssemblyLinearVelocity
+                local horizSpeed = math.max(18, Vector2.new(vel.X, vel.Z).Magnitude)
+                local targetVel = moveDir.Unit * horizSpeed
+                myHrp.AssemblyLinearVelocity = Vector3.new(
+                    vel.X + (targetVel.X - vel.X) * math.clamp(dt * 9, 0, 1),
+                    vel.Y,
+                    vel.Z + (targetVel.Z - vel.Z) * math.clamp(dt * 9, 0, 1)
+                )
+            end
+
+            if F["Misc_FastStop"] and onGround and moveDir.Magnitude < 0.02 then
+                local vel = myHrp.AssemblyLinearVelocity
+                if Vector2.new(vel.X, vel.Z).Magnitude > 2 then
+                    myHrp.AssemblyLinearVelocity = Vector3.new(vel.X * 0.15, vel.Y, vel.Z * 0.15)
+                end
+            end
+        end
+
+        -- 4) 2D Player Overlays, Tracers, Off-Screen Arrows & Chams Highlights
+        local anyESP = F["ESP_Box"] or F["ESP_Name"] or F["ESP_Health"] or F["ESP_Weapon"] or F["ESP_Glow"]
+            or F["ESP_Tracers"] or F["ESP_OOF"] or F["ESP_HeadDot"] or F["Chams_Vis"] or F["Chams_XQZ"]
+        local maxDist = tonumber(F["ESP_MaxDist"]) or 2000
+        local teamCheck = (F["ESP_TeamCheck"] == true)
+        local boxStyle = F["ESP_BoxStyle"] or "Full 2D"
+        local hpBarPos = F["ESP_HealthPos"] or "Left"
+        local showHpText = (F["ESP_HealthText"] == true)
+        local tracerOriginMode = F["ESP_TracerOrigin"] or "Bottom"
+        local activeFlags = type(F["ESP_Flags"]) == "table" and F["ESP_Flags"] or nil
+        local chamsMat = F["Chams_Mat"] or "Metallic"
+        local pulseWave = 0.5 + 0.5 * math.sin(os.clock() * 4.2)
+
         for _, plr in ipairs(Players:GetPlayers()) do
             if plr ~= LocalPlayer then
                 local isWhitelisted = (F["Misc_Whitelist"] == true) and (F["Misc_PlayerTarget"] == plr.Name)
+                local isTeammate = (LocalPlayer and plr.Team ~= nil and plr.Team == LocalPlayer.Team)
+                local skipTeam = teamCheck and isTeammate
                 local char = plr.Character
                 local hum = char and char:FindFirstChildOfClass("Humanoid")
                 local hrp = char and (char:FindFirstChild("HumanoidRootPart") or char.PrimaryPart)
-                if anyESP and not isWhitelisted and char and hum and hrp and hum.Health > 0 then
+                local distStuds = 0
+                if hrp then
+                    distStuds = (cam.CFrame.Position - hrp.Position).Magnitude
+                end
+                if anyESP and not isWhitelisted and not skipTeam and char and hum and hrp and hum.Health > 0 and distStuds <= maxDist then
                     local c = GetOrMakeCard(plr)
                     local topPos, onScreenTop = cam:WorldToViewportPoint(hrp.Position + Vector3.new(0, 2.8, 0))
                     local botPos, onScreenBot = cam:WorldToViewportPoint(hrp.Position - Vector3.new(0, 3.2, 0))
-                    if (onScreenTop or onScreenBot) and topPos.Z > 0 then
+                    local centerPos, onScreenCenter = cam:WorldToViewportPoint(hrp.Position)
+
+                    if (onScreenTop or onScreenBot or onScreenCenter) and topPos.Z > 0 then
+                        c.OOFArrow.Visible = false
                         local h = math.clamp(math.abs(botPos.Y - topPos.Y), 16, 600)
                         local w = math.clamp(h * 0.58, 12, 400)
-                        c.Root.Position = UDim2.fromOffset(math.floor(topPos.X - w * 0.5 + 0.5), math.floor(topPos.Y + 0.5))
+                        local rx = math.floor(topPos.X - w * 0.5 + 0.5)
+                        local ry = math.floor(topPos.Y + 0.5)
+                        c.Root.Position = UDim2.fromOffset(rx, ry)
                         c.Root.Size = UDim2.fromOffset(math.floor(w + 0.5), math.floor(h + 0.5))
                         c.Root.Visible = true
 
-                        c.Box.Visible = (F["ESP_Box"] == true)
-                        c.BoxStroke.Color = F["ESP_BoxColor"] or self.Theme.Accent
+                        local boxCol = F["ESP_BoxColor"] or self.Theme.Accent
+                        local showBox = (F["ESP_Box"] == true)
+                        local isCorner = (boxStyle == "Corner")
+                        local isFilled = (boxStyle == "Filled 2D")
+                        c.Box.Visible = showBox and not isCorner
+                        c.BoxStroke.Color = boxCol
+                        c.BoxFill.Visible = showBox and isFilled
+                        c.BoxFill.BackgroundColor3 = boxCol
+                        c.BoxFill.BackgroundTransparency = math.clamp(1 - (tonumber(F["ESP_BoxFillAlpha"]) or 0.18), 0.35, 0.95)
+                        for _, seg in ipairs(c.Corners) do
+                            seg.Visible = showBox and isCorner
+                            seg.BackgroundColor3 = boxCol
+                        end
+
+                        c.HeadDot.Visible = (F["ESP_HeadDot"] == true)
+                        c.HeadDot.BackgroundColor3 = boxCol
+                        local headPart = char:FindFirstChild("Head")
+                        if headPart and c.HeadDot.Visible then
+                            local hp2d = cam:WorldToViewportPoint(headPart.Position)
+                            c.HeadDot.Position = UDim2.fromOffset(math.floor(hp2d.X - rx + 0.5), math.floor(hp2d.Y - ry + 0.5))
+                        end
 
                         c.Name.Visible = (F["ESP_Name"] == true)
                         c.Name.TextColor3 = F["ESP_NameColor"] or self.Theme.Text
                         c.Name.Text = string.format("%s [%d]", plr.Name, math.floor(hum.Health + 0.5))
 
-                        c.HpBg.Visible = (F["ESP_Health"] == true)
+                        local showHp = (F["ESP_Health"] == true)
+                        c.HpBg.Visible = showHp
                         local hpRatio = math.clamp(hum.Health / math.max(1, hum.MaxHealth), 0, 1)
-                        c.HpFill.Size = UDim2.fromScale(1, hpRatio)
                         c.HpFill.BackgroundColor3 = Color3.fromHSV(hpRatio * 0.33, 0.85, 0.92)
+                        if hpBarPos == "Bottom" then
+                            c.HpBg.Position = UDim2.new(0, 0, 1, 3)
+                            c.HpBg.Size = UDim2.new(1, 0, 0, 3)
+                            c.HpFill.AnchorPoint = Vector2.new(0, 0)
+                            c.HpFill.Position = UDim2.fromScale(0, 0)
+                            c.HpFill.Size = UDim2.fromScale(hpRatio, 1)
+                            c.Dist.Position = UDim2.new(0.5, 0, 1, 8)
+                        elseif hpBarPos == "Right" then
+                            c.HpBg.Position = UDim2.new(1, 3, 0, 0)
+                            c.HpBg.Size = UDim2.new(0, 3, 1, 0)
+                            c.HpFill.AnchorPoint = Vector2.new(0, 1)
+                            c.HpFill.Position = UDim2.fromScale(0, 1)
+                            c.HpFill.Size = UDim2.fromScale(1, hpRatio)
+                            c.Dist.Position = UDim2.new(0.5, 0, 1, 2)
+                        else
+                            c.HpBg.Position = UDim2.fromOffset(-6, 0)
+                            c.HpBg.Size = UDim2.new(0, 3, 1, 0)
+                            c.HpFill.AnchorPoint = Vector2.new(0, 1)
+                            c.HpFill.Position = UDim2.fromScale(0, 1)
+                            c.HpFill.Size = UDim2.fromScale(1, hpRatio)
+                            c.Dist.Position = UDim2.new(0.5, 0, 1, 2)
+                        end
+                        c.HpText.Visible = showHp and showHpText
+                        if c.HpText.Visible then
+                            c.HpText.Text = tostring(math.floor(hum.Health + 0.5))
+                            c.HpText.Position = UDim2.new(0, -2, 1 - hpRatio, 0)
+                        end
 
                         local tool = char:FindFirstChildOfClass("Tool")
                         c.Dist.Visible = (F["ESP_Weapon"] == true)
                         c.Dist.TextColor3 = F["ESP_WeaponColor"] or self.Theme.TextDim
                         c.Dist.Text = tool and string.upper(tool.Name) or "UNARMED"
+
+                        -- Live Right-Side ESP Flags
+                        for key, fl in pairs(c.FlagLabels) do
+                            local enabled = activeFlags and (activeFlags[key] == true) or false
+                            fl.Visible = enabled
+                            if enabled and key == "Distance" then
+                                fl.Text = string.format("%dFT", math.floor(distStuds + 0.5))
+                            end
+                        end
+
+                        -- 2D Snapline / Tracer
+                        if F["ESP_Tracers"] == true then
+                            local origin = Vector2.new(vp.X * 0.5, vp.Y - 4)
+                            if tracerOriginMode == "Center" then
+                                origin = Vector2.new(vp.X * 0.5, vp.Y * 0.5)
+                            elseif tracerOriginMode == "Mouse" then
+                                origin = mPos
+                            end
+                            local dest = Vector2.new(rx + w * 0.5, ry + h)
+                            local delta = dest - origin
+                            local len = delta.Magnitude
+                            local mid = (origin + dest) * 0.5
+                            c.Tracer.Visible = true
+                            c.Tracer.BackgroundColor3 = F["ESP_TracerColor"] or boxCol
+                            c.Tracer.Position = UDim2.fromOffset(mid.X, mid.Y)
+                            c.Tracer.Size = UDim2.fromOffset(len, 1)
+                            c.Tracer.Rotation = math.deg(math.atan2(delta.Y, delta.X))
+                        else
+                            c.Tracer.Visible = false
+                        end
                     else
                         c.Root.Visible = false
+                        c.Tracer.Visible = false
+
+                        -- Off-Screen Arrow when player is behind or outside viewport
+                        if F["ESP_OOF"] == true then
+                            local rel = cam.CFrame:PointToObjectSpace(hrp.Position)
+                            local ang = math.atan2(-rel.Y, rel.X)
+                            local oofRadius = math.clamp(tonumber(F["ESP_OOFRadius"]) or 150, 50, 420)
+                            local oofSize = math.clamp(tonumber(F["ESP_OOFSize"]) or 11, 6, 22)
+                            local cx = vp.X * 0.5 + math.cos(ang) * oofRadius
+                            local cy = vp.Y * 0.5 + math.sin(ang) * oofRadius
+                            c.OOFArrow.Visible = true
+                            c.OOFArrow.Position = UDim2.fromOffset(cx, cy)
+                            c.OOFArrow.Size = UDim2.fromOffset(oofSize, oofSize)
+                            c.OOFArrow.Rotation = math.deg(ang) + 45
+                            c.OOFArrow.BackgroundColor3 = F["ESP_OOFColor"] or self.Theme.Risky
+                            c.OOFArrow.BackgroundTransparency = 0.1 + 0.35 * pulseWave
+                            c.OOFTag.Text = string.format("%s [%dft]", plr.Name, math.floor(distStuds + 0.5))
+                        else
+                            c.OOFArrow.Visible = false
+                        end
                     end
 
-                    -- Highlight Chams & Glow Stencil
+                    -- Highlight Chams & Glow Stencil (Material-Aware)
                     local hasChams = F["Chams_Vis"] or F["Chams_XQZ"]
                     if hasChams or F["ESP_Glow"] then
                         if not c.Highlight or c.Highlight.Parent ~= char then
@@ -2553,11 +3499,29 @@ function Library:CreateWorldController()
                         end
                         c.Highlight.Enabled = true
                         c.Highlight.DepthMode = (F["Chams_XQZ"] or F["ESP_Glow"]) and Enum.HighlightDepthMode.AlwaysOnTop or Enum.HighlightDepthMode.Occluded
-                        c.Highlight.FillColor = F["Chams_Vis"] and (F["Chams_VisCol"] or self.Theme.Accent) or (F["Chams_XQZCol"] or self.Theme.Accent)
-                        c.Highlight.OutlineColor = F["ESP_GlowColor"] or Color3.new(0, 0, 0)
-                        c.Highlight.FillTransparency = hasChams and 0.45 or 1
-                        local glowAlpha = self.Options["ESP_GlowColor"] and self.Options["ESP_GlowColor"].Alpha or 0.1
-                        c.Highlight.OutlineTransparency = F["ESP_Glow"] and math.clamp(glowAlpha, 0, 0.95) or 1
+
+                        local baseCol = F["Chams_Vis"] and (F["Chams_VisCol"] or self.Theme.Accent) or (F["Chams_XQZCol"] or self.Theme.Accent)
+                        local accentCol2 = F["Chams_VisCol2"] or F["ESP_GlowColor"] or Color3.new(0, 0, 0)
+                        local fillTrans = tonumber(F["Chams_FillTrans"]) or 0.42
+                        local outTrans = F["ESP_Glow"] and math.clamp((self.Options["ESP_GlowColor"] and self.Options["ESP_GlowColor"].Alpha) or 0.1, 0, 0.95) or 0.35
+
+                        if chamsMat == "Flat" then
+                            fillTrans = math.min(fillTrans, 0.18)
+                        elseif chamsMat == "Glass Wireframe" then
+                            fillTrans = 0.86
+                            outTrans = 0.05
+                        elseif chamsMat == "Glow Overlay" then
+                            baseCol = baseCol:Lerp(accentCol2, pulseWave * 0.45)
+                            fillTrans = 0.3 + pulseWave * 0.35
+                            outTrans = 0.05
+                        elseif chamsMat == "Metallic" then
+                            baseCol = baseCol:Lerp(Color3.new(1, 1, 1), 0.18)
+                        end
+
+                        c.Highlight.FillColor = baseCol
+                        c.Highlight.OutlineColor = F["ESP_Glow"] and (F["ESP_GlowColor"] or accentCol2) or accentCol2
+                        c.Highlight.FillTransparency = hasChams and math.clamp(fillTrans, 0, 1) or 1
+                        c.Highlight.OutlineTransparency = (F["ESP_Glow"] or chamsMat == "Glass Wireframe" or chamsMat == "Glow Overlay") and outTrans or 1
                     elseif c.Highlight then
                         c.Highlight.Enabled = false
                     end
@@ -2565,6 +3529,8 @@ function Library:CreateWorldController()
                     local c = cards[plr]
                     if c then
                         c.Root.Visible = false
+                        c.Tracer.Visible = false
+                        c.OOFArrow.Visible = false
                         if c.Highlight then c.Highlight.Enabled = false end
                     end
                 end
@@ -2574,6 +3540,7 @@ function Library:CreateWorldController()
 
     self.WorldController = {
         Folder = overlayFolder,
+        SpawnTracer = SpawnTracer,
         Cleanup = function()
             for plr in pairs(playerConns) do
                 DisconnectPlayerConns(plr)
@@ -2584,16 +3551,60 @@ function Library:CreateWorldController()
                 end
             end
             table.clear(cards)
-            if nightApplied then
+            if beamFolder and beamFolder.Parent then
+                pcall(function() beamFolder:Destroy() end)
+            end
+            if ccEffect and ccEffect.Parent then
+                pcall(function() ccEffect:Destroy() end)
+            end
+            for eff in pairs(disabledPostEffects) do
+                if eff and eff.Parent then
+                    pcall(function() eff.Enabled = true end)
+                end
+            end
+            table.clear(disabledPostEffects)
+            if nightApplied or fullbrightApplied then
                 nightApplied = false
+                fullbrightApplied = false
                 lighting.Ambient = origAmbient
                 lighting.OutdoorAmbient = origOutdoor
                 lighting.ExposureCompensation = origExposure
+                lighting.Brightness = origBrightness
+                lighting.GlobalShadows = origGlobalShadows
+            end
+            if clockApplied then
+                clockApplied = false
+                lighting.ClockTime = origClockTime
+            end
+            if fogApplied then
+                fogApplied = false
+                lighting.FogStart = origFogStart
+                lighting.FogEnd = origFogEnd
+                lighting.FogColor = origFogColor
+            end
+            if fovApplied and workspace.CurrentCamera then
+                fovApplied = false
+                workspace.CurrentCamera.FieldOfView = origCamFov
             end
             if tpApplied and LocalPlayer then
                 tpApplied = false
                 LocalPlayer.CameraMinZoomDistance = origMinZoom
                 LocalPlayer.CameraMaxZoomDistance = origMaxZoom
+            end
+            if noclipApplied then
+                noclipApplied = false
+                for part in pairs(noclipParts) do
+                    if part and part.Parent then
+                        pcall(function() part.CanCollide = true end)
+                    end
+                end
+                table.clear(noclipParts)
+            end
+            local myChar = LocalPlayer and LocalPlayer.Character
+            local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
+            if myHum then
+                if speedApplied then myHum.WalkSpeed = 16 end
+                if jumpApplied then myHum.JumpPower = 50 end
             end
         end,
     }
@@ -3819,6 +4830,9 @@ function GroupboxMethods:AddSlider(cfg)
         local pct = math.clamp((clamped - min) / math.max(0.0001, max - min), 0, 1)
         Library:Tween(fill, TweenFast, { Size = UDim2.fromScale(pct, 1) })
         valLabel.Text = FormatValue(clamped)
+        if Library.ESPPreview then
+            Library.ESPPreview:Refresh()
+        end
         if Library.Indicators then
             Library.Indicators:Refresh()
         end
@@ -3848,6 +4862,10 @@ function GroupboxMethods:AddSlider(cfg)
             Library:Tween(trackStroke, TweenFast, { Color = Library.Theme.Accent })
             Library:Tween(topLabel, TweenFast, { TextColor3 = Library.Theme.Text })
             UpdateFromInput(input)
+        elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+            if cfg.Default ~= nil then
+                Slider:Set(cfg.Default)
+            end
         end
     end)
 
@@ -4043,6 +5061,7 @@ function GroupboxMethods:AddDropdown(cfg)
             task.delay(0.14, function()
                 if closeToken == token and not opened then
                     dropMenu.Visible = false
+                    holder.ZIndex = 10
                 end
             end)
         end
@@ -4346,6 +5365,7 @@ function GroupboxMethods:AddDropdown(cfg)
         opened = nextState
         if opened then
             closeToken += 1
+            holder.ZIndex = 35
             dropMenu.Visible = true
             Library:Tween(chevron, TweenFast, { Rotation = 180 })
             Library:Tween(boxStroke, TweenFast, { Color = Library.Theme.Accent })
@@ -5081,9 +6101,7 @@ local function CreateGroupboxContainer(parentColumn, title, iconName)
     Library:Connect(layout:GetPropertyChangedSignal("AbsoluteContentSize"), function()
         local contentH = layout.AbsoluteContentSize.Y
         container.Size = UDim2.new(1, -20, 0, contentH)
-        Library:Tween(wrapper, TweenFast, {
-            Size = UDim2.new(1, 0, 0, contentH + 30)
-        })
+        wrapper.Size = UDim2.new(1, 0, 0, contentH + 30)
     end)
 
     return setmetatable({
@@ -5161,9 +6179,7 @@ local function CreateTabboxContainer(parentColumn, title)
         if Tabbox.ActiveTab then
             local h = Tabbox.ActiveTab.Layout.AbsoluteContentSize.Y
             Tabbox.ActiveTab.Container.Size = UDim2.new(1, -20, 0, h)
-            Library:Tween(wrapper, TweenFast, {
-                Size = UDim2.new(1, 0, 0, h + 49)
-            })
+            wrapper.Size = UDim2.new(1, 0, 0, h + 49)
         end
     end
 
@@ -6174,7 +7190,17 @@ function Library:CreateESPPreview(window, targetTab)
     MakePart(23, 162, 21, 14, "Feet", "FT")
     MakePart(48, 162, 21, 14, "Feet", "FT")
 
-    -- 2D Bounding Box around Dummy
+    -- 2D Bounding Box around Dummy (Supports Full 2D, Corner, and Filled 2D)
+    local espBoxFill = self:Create("Frame", {
+        BackgroundColor3 = Color3.fromRGB(155, 195, 55),
+        BackgroundTransparency = 0.82,
+        BorderSizePixel = 0,
+        Size = UDim2.fromScale(1, 1),
+        Visible = false,
+        ZIndex = 26,
+        Parent = dummyRoot,
+    })
+
     local espBox = self:Create("Frame", {
         BackgroundTransparency = 1,
         Position = UDim2.fromOffset(0, 0),
@@ -6196,6 +7222,57 @@ function Library:CreateESPPreview(window, targetTab)
         Parent = espBox,
     })
 
+    local previewCorners = {}
+    local pCornerDefs = {
+        { AX = 0, AY = 0, PX = 0, PY = 0, Horiz = true },
+        { AX = 0, AY = 0, PX = 0, PY = 0, Horiz = false },
+        { AX = 1, AY = 0, PX = 1, PY = 0, Horiz = true },
+        { AX = 1, AY = 0, PX = 1, PY = 0, Horiz = false },
+        { AX = 0, AY = 1, PX = 0, PY = 1, Horiz = true },
+        { AX = 0, AY = 1, PX = 0, PY = 1, Horiz = false },
+        { AX = 1, AY = 1, PX = 1, PY = 1, Horiz = true },
+        { AX = 1, AY = 1, PX = 1, PY = 1, Horiz = false },
+    }
+    for _, d in ipairs(pCornerDefs) do
+        local seg = self:Create("Frame", {
+            AnchorPoint = Vector2.new(d.AX, d.AY),
+            BackgroundColor3 = Color3.fromRGB(155, 195, 55),
+            BorderSizePixel = 0,
+            Position = UDim2.fromScale(d.PX, d.PY),
+            Size = d.Horiz and UDim2.new(0.28, 0, 0, 1) or UDim2.new(0, 1, 0.24, 0),
+            Visible = false,
+            ZIndex = 28,
+            Parent = dummyRoot,
+        })
+        self:Create("UIStroke", { Color = Color3.new(0, 0, 0), Thickness = 1, Transparency = 0.25, Parent = seg })
+        table.insert(previewCorners, seg)
+    end
+
+    local previewHeadDot = self:Create("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundColor3 = Color3.fromRGB(155, 195, 55),
+        BorderSizePixel = 0,
+        Position = UDim2.fromOffset(46, 14),
+        Size = UDim2.fromOffset(5, 5),
+        Visible = false,
+        ZIndex = 29,
+        Parent = dummyRoot,
+    })
+    self:Create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = previewHeadDot })
+    self:Create("UIStroke", { Color = Color3.new(0, 0, 0), Thickness = 1, Parent = previewHeadDot })
+
+    local previewTracer = self:Create("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0),
+        BackgroundColor3 = Color3.fromRGB(155, 195, 55),
+        BorderSizePixel = 0,
+        Position = UDim2.new(0.5, 0, 1, 0),
+        Size = UDim2.fromOffset(1, 34),
+        Visible = false,
+        ZIndex = 27,
+        Parent = dummyRoot,
+    })
+    self:Create("UIStroke", { Color = Color3.new(0, 0, 0), Thickness = 1, Transparency = 0.25, Parent = previewTracer })
+
     -- Top Player Name Label
     local espName = self:Create("TextLabel", {
         AnchorPoint = Vector2.new(0.5, 1),
@@ -6210,7 +7287,7 @@ function Library:CreateESPPreview(window, targetTab)
         Parent = dummyRoot,
     })
 
-    -- Left Vertical Health Bar (CS:GO 2px bar with black outline)
+    -- Health Bar (Supports Left, Right, Bottom + HP Value Text)
     local hpBarBg = self:Create("Frame", {
         BackgroundColor3 = Color3.fromRGB(10, 10, 12),
         BorderSizePixel = 0,
@@ -6231,6 +7308,20 @@ function Library:CreateESPPreview(window, targetTab)
     self:Create("UIStroke", {
         Color = Color3.new(0, 0, 0),
         Thickness = 1,
+        Parent = hpBarBg,
+    })
+    local hpValPreview = self:Create("TextLabel", {
+        AnchorPoint = Vector2.new(1, 0.5),
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, -2, 0.08, 0),
+        Size = UDim2.fromOffset(26, 10),
+        Font = Enum.Font.GothamBold,
+        Text = "92",
+        TextColor3 = Color3.new(1, 1, 1),
+        TextSize = 9,
+        TextXAlignment = Enum.TextXAlignment.Right,
+        Visible = false,
+        ZIndex = 29,
         Parent = hpBarBg,
     })
 
@@ -6311,55 +7402,113 @@ function Library:CreateESPPreview(window, targetTab)
     end
 
     function PreviewObj:Refresh()
-        local showBox = Library.Flags["ESP_Box"]
-        espBox.Visible = (showBox == true)
-        espBoxStroke.Color = Library.Flags["ESP_BoxColor"] or Library.Theme.Accent
+        local F = Library.Flags
+        local showBox = (F["ESP_Box"] == true)
+        local boxStyle = F["ESP_BoxStyle"] or "Full 2D"
+        local boxCol = F["ESP_BoxColor"] or Library.Theme.Accent
+        local isCorner = (boxStyle == "Corner")
+        local isFilled = (boxStyle == "Filled 2D")
 
-        local showName = Library.Flags["ESP_Name"]
+        espBox.Visible = showBox and not isCorner
+        espBoxStroke.Color = boxCol
+        espBoxFill.Visible = showBox and isFilled
+        espBoxFill.BackgroundColor3 = boxCol
+        espBoxFill.BackgroundTransparency = math.clamp(1 - (tonumber(F["ESP_BoxFillAlpha"]) or 0.18), 0.35, 0.95)
+        for _, seg in ipairs(previewCorners) do
+            seg.Visible = showBox and isCorner
+            seg.BackgroundColor3 = boxCol
+        end
+
+        previewHeadDot.Visible = (F["ESP_HeadDot"] == true)
+        previewHeadDot.BackgroundColor3 = boxCol
+
+        previewTracer.Visible = (F["ESP_Tracers"] == true)
+        previewTracer.BackgroundColor3 = F["ESP_TracerColor"] or boxCol
+
+        local showName = F["ESP_Name"]
         espName.Visible = (showName == true)
-        espName.TextColor3 = Library.Flags["ESP_NameColor"] or Color3.fromRGB(235, 235, 240)
+        espName.TextColor3 = F["ESP_NameColor"] or Color3.fromRGB(235, 235, 240)
 
-        local showHp = Library.Flags["ESP_Health"]
-        hpBarBg.Visible = (showHp == true)
+        local showHp = (F["ESP_Health"] == true)
+        local hpPos = F["ESP_HealthPos"] or "Left"
+        hpBarBg.Visible = showHp
+        hpValPreview.Visible = showHp and (F["ESP_HealthText"] == true)
+        if hpPos == "Bottom" then
+            hpBarBg.Position = UDim2.new(0, 0, 1, 3)
+            hpBarBg.Size = UDim2.new(1, 0, 0, 4)
+            hpBarFill.AnchorPoint = Vector2.new(0, 0)
+            hpBarFill.Position = UDim2.fromScale(0, 0)
+            hpBarFill.Size = UDim2.new(0.92, 0, 1, 0)
+            espWeapon.Position = UDim2.new(0.5, 0, 1, 10)
+        elseif hpPos == "Right" then
+            hpBarBg.Position = UDim2.new(1, 4, 0, 0)
+            hpBarBg.Size = UDim2.new(0, 4, 1, 0)
+            hpBarFill.AnchorPoint = Vector2.new(0, 1)
+            hpBarFill.Position = UDim2.fromScale(0, 1)
+            hpBarFill.Size = UDim2.new(1, 0, 0.92, 0)
+            espWeapon.Position = UDim2.new(0.5, 0, 1, 4)
+        else
+            hpBarBg.Position = UDim2.fromOffset(-7, 0)
+            hpBarBg.Size = UDim2.new(0, 4, 1, 0)
+            hpBarFill.AnchorPoint = Vector2.new(0, 1)
+            hpBarFill.Position = UDim2.fromScale(0, 1)
+            hpBarFill.Size = UDim2.new(1, 0, 0.92, 0)
+            espWeapon.Position = UDim2.new(0.5, 0, 1, 4)
+        end
 
-        local showWeap = Library.Flags["ESP_Weapon"]
+        local showWeap = F["ESP_Weapon"]
         espWeapon.Visible = (showWeap == true)
-        espWeapon.TextColor3 = Library.Flags["ESP_WeaponColor"] or Color3.fromRGB(170, 200, 255)
+        espWeapon.TextColor3 = F["ESP_WeaponColor"] or Color3.fromRGB(170, 200, 255)
 
-        local showGlow = Library.Flags["ESP_Glow"]
+        local showGlow = F["ESP_Glow"]
         glowAura.Visible = (showGlow == true)
-        glowAura.ImageColor3 = Library.Flags["ESP_GlowColor"] or Color3.fromRGB(225, 55, 110)
+        glowAura.ImageColor3 = F["ESP_GlowColor"] or Color3.fromRGB(225, 55, 110)
 
-        local visChams = Library.Flags["Chams_Vis"]
-        local xqzChams = Library.Flags["Chams_XQZ"]
-        local visCol = Library.Flags["Chams_VisCol"] or Library.Theme.Accent
-        local xqzCol = Library.Flags["Chams_XQZCol"] or Color3.fromRGB(60, 145, 245)
-        local activeHitboxes = Library.Flags["Rage_Hitboxes"]
+        local visChams = F["Chams_Vis"]
+        local xqzChams = F["Chams_XQZ"]
+        local visCol = F["Chams_VisCol"] or Library.Theme.Accent
+        local visCol2 = F["Chams_VisCol2"] or Color3.fromRGB(225, 55, 110)
+        local xqzCol = F["Chams_XQZCol"] or Color3.fromRGB(60, 145, 245)
+        local chamsMat = F["Chams_Mat"] or "Metallic"
+        local fillTrans = tonumber(F["Chams_FillTrans"]) or 0.25
+        local activeHitboxes = F["Rage_Hitboxes"]
+
         for _, bp in ipairs(bodyParts) do
             local hbSelected = false
             if type(activeHitboxes) == "table" then
                 hbSelected = (activeHitboxes[bp.Zone] == true)
             end
             local isHover = (hitboxHovered == bp.Zone)
-            if visChams then
-                Library:Tween(bp.Frame, TweenFast, {
-                    BackgroundColor3 = visCol,
-                    BackgroundTransparency = hbSelected and 0.14 or 0.58,
-                })
-            elseif xqzChams then
-                Library:Tween(bp.Frame, TweenFast, {
-                    BackgroundColor3 = xqzCol,
-                    BackgroundTransparency = hbSelected and 0.28 or 0.65,
-                })
-            else
-                Library:Tween(bp.Frame, TweenFast, {
-                    BackgroundColor3 = Color3.fromRGB(52, 54, 66),
-                    BackgroundTransparency = hbSelected and 0.22 or 0.62,
-                })
+            local pCol = Color3.fromRGB(52, 54, 66)
+            local pTrans = hbSelected and 0.22 or 0.62
+            local strokeCol = isHover and Color3.new(1, 1, 1) or (hbSelected and Library.Theme.Accent or Color3.fromRGB(16, 16, 22))
+
+            if visChams or xqzChams then
+                pCol = visChams and visCol or xqzCol
+                if chamsMat == "Flat" then
+                    pTrans = hbSelected and 0.08 or math.clamp(fillTrans, 0.1, 0.7)
+                elseif chamsMat == "Glass Wireframe" then
+                    pTrans = 0.85
+                    strokeCol = visChams and visCol or xqzCol
+                elseif chamsMat == "Glow Overlay" then
+                    pCol = pCol:Lerp(visCol2, 0.38)
+                    pTrans = hbSelected and 0.18 or 0.45
+                    strokeCol = visCol2
+                elseif chamsMat == "Metallic" then
+                    pCol = pCol:Lerp(Color3.new(1, 1, 1), 0.18)
+                    pTrans = hbSelected and 0.14 or math.clamp(fillTrans + 0.15, 0.15, 0.75)
+                else
+                    pTrans = hbSelected and 0.14 or math.clamp(fillTrans + 0.2, 0.15, 0.75)
+                end
             end
+
+            Library:Tween(bp.Frame, TweenFast, {
+                BackgroundColor3 = pCol,
+                BackgroundTransparency = pTrans,
+            })
             Library:Tween(bp.Stroke, TweenFast, {
-                Color = isHover and Color3.new(1, 1, 1) or (hbSelected and Library.Theme.Accent or Color3.fromRGB(16, 16, 22)),
-                Thickness = (hbSelected or isHover) and 1 or 1,
+                Color = strokeCol,
+                Thickness = 1,
             })
             if bp.Node then
                 bp.Node.Visible = hbSelected or isHover
@@ -6370,7 +7519,7 @@ function Library:CreateESPPreview(window, targetTab)
             end
         end
 
-        local activeFlags = Library.Flags["ESP_Flags"]
+        local activeFlags = F["ESP_Flags"]
         for key, lbl in pairs(flagLabels) do
             if type(activeFlags) == "table" then
                 lbl.Visible = (activeFlags[key] == true)
@@ -6509,6 +7658,43 @@ function Library:BuildConfigTab(tab)
         Default = false,
         Callback = function(v)
             if self.Watermark then self.Watermark:SetVisible(v) end
+        end
+    })
+    local wmSub = wmToggle:AddSubSection()
+    wmSub:AddInput({
+        Name = "Custom Watermark Title",
+        Flag = "UI_WatermarkText",
+        Default = "shards.cc | counter-strike",
+        Placeholder = "shards.cc | cs2",
+        Callback = function(txt)
+            if self.Watermark and self.Watermark.Refresh then
+                self.Watermark.Refresh()
+            end
+        end
+    })
+    wmSub:AddDropdown({
+        Name = "Watermark Telemetry Fields",
+        Flag = "UI_WatermarkFields",
+        Multi = true,
+        Values = { "User", "FPS", "Ping", "Time", "Build" },
+        Default = { "User", "FPS", "Ping", "Time" },
+        Callback = function()
+            if self.Watermark and self.Watermark.Refresh then
+                self.Watermark.Refresh()
+            end
+        end
+    })
+    wmSub:AddSlider({
+        Name = "Watermark Background Transparency",
+        Flag = "UI_WatermarkAlpha",
+        Min = 0,
+        Max = 0.8,
+        Rounding = 2,
+        Default = 0,
+        Callback = function()
+            if self.Watermark and self.Watermark.Refresh then
+                self.Watermark.Refresh()
+            end
         end
     })
 
