@@ -784,13 +784,13 @@ end
 local HitlogHolder = Library:Create("Frame", {
     Name = "HitlogOverlay",
     BackgroundTransparency = 1,
-    Position = UDim2.fromOffset(10, 8),
+    Position = UDim2.fromOffset(14, 60),
     Size = UDim2.fromOffset(650, 260),
     ZIndex = 390,
     Parent = ScreenGui,
 })
 Library:Create("UIListLayout", {
-    Padding = UDim.new(0, 2),
+    Padding = UDim.new(0, 4),
     SortOrder = Enum.SortOrder.LayoutOrder,
     Parent = HitlogHolder,
 })
@@ -860,28 +860,45 @@ function Library:AddHitlog(cfg)
         )
     end
 
+    local plainStr = string.gsub(richStr, "<[^>]+>", "")
+    local bounds = self:GetTextBounds(plainStr, 12, Vector2.new(900, 30))
+    local pillW = math.max(90, bounds.X + 22)
+
     local row = self:Create("Frame", {
         BackgroundTransparency = 1,
         LayoutOrder = hitlogCounter,
-        Size = UDim2.new(1, 0, 0, 15),
+        Size = UDim2.fromOffset(pillW, 20),
         ZIndex = 391,
         Parent = HitlogHolder,
     })
 
+    local bg = self:Create("Frame", {
+        BackgroundColor3 = self.Theme.Background,
+        BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(-12, 0),
+        Size = UDim2.fromScale(1, 1),
+        ZIndex = 391,
+        Parent = row,
+    })
+    self:BindTheme(bg, "BackgroundColor3", "Background")
+    local bgStroke, bgOuterStroke = self:ApplyCSBorder(bg, "InnerBorder")
+    bgStroke.Transparency = 1
+    bgOuterStroke.Transparency = 1
+
     local bar = self:Create("Frame", {
         BackgroundColor3 = accentCol,
         BorderSizePixel = 0,
-        Position = UDim2.fromOffset(-12, 2),
-        Size = UDim2.fromOffset(2, 11),
+        Position = UDim2.fromOffset(0, 0),
+        Size = UDim2.new(0, 2, 1, 0),
         BackgroundTransparency = 1,
         ZIndex = 392,
-        Parent = row,
+        Parent = bg,
     })
 
     local line = self:Create("TextLabel", {
         BackgroundTransparency = 1,
-        Position = UDim2.fromOffset(-8, 0),
-        Size = UDim2.new(1, 0, 1, 0),
+        Position = UDim2.fromOffset(8, 0),
+        Size = UDim2.new(1, -12, 1, 0),
         Font = Enum.Font.Code,
         RichText = true,
         Text = richStr,
@@ -891,16 +908,21 @@ function Library:AddHitlog(cfg)
         TextStrokeColor3 = Color3.new(0, 0, 0),
         TextStrokeTransparency = 1,
         TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Center,
         ZIndex = 392,
-        Parent = row,
+        Parent = bg,
     })
 
+    self:Tween(bg, TweenFast, {
+        Position = UDim2.fromOffset(0, 0),
+        BackgroundTransparency = 0.12,
+    })
+    self:Tween(bgStroke, TweenFast, { Transparency = 0 })
+    self:Tween(bgOuterStroke, TweenFast, { Transparency = 0 })
     self:Tween(bar, TweenFast, {
-        Position = UDim2.fromOffset(0, 2),
         BackgroundTransparency = 0,
     })
     self:Tween(line, TweenFast, {
-        Position = UDim2.fromOffset(6, 0),
         TextTransparency = 0,
         TextStrokeTransparency = 0.15,
     })
@@ -921,12 +943,16 @@ function Library:AddHitlog(cfg)
 
     task.delay(duration, function()
         if not row or not row.Parent then return end
+        self:Tween(bg, TweenMedium, {
+            Position = UDim2.fromOffset(-10, 0),
+            BackgroundTransparency = 1,
+        })
+        self:Tween(bgStroke, TweenMedium, { Transparency = 1 })
+        self:Tween(bgOuterStroke, TweenMedium, { Transparency = 1 })
         self:Tween(bar, TweenMedium, {
-            Position = UDim2.fromOffset(-10, 2),
             BackgroundTransparency = 1,
         })
         self:Tween(line, TweenMedium, {
-            Position = UDim2.fromOffset(-6, 0),
             TextTransparency = 1,
             TextStrokeTransparency = 1,
         })
@@ -945,6 +971,7 @@ function Library:CreateWatermark(customTitle)
         BackgroundColor3 = self.Theme.Background,
         Position = UDim2.new(1, -14, 0, 12),
         Size = UDim2.fromOffset(280, 24),
+        Visible = false,
         ZIndex = 300,
         Parent = ScreenGui,
     })
@@ -1028,6 +1055,7 @@ function Library:CreateKeybindList()
         BackgroundColor3 = self.Theme.Background,
         Position = UDim2.new(0, 16, 0.45, 0),
         Size = UDim2.fromOffset(185, 28),
+        Visible = false,
         ZIndex = 280,
         Parent = ScreenGui,
     })
@@ -1200,6 +1228,7 @@ function Library:CreateSpectatorList()
         BackgroundColor3 = self.Theme.Background,
         Position = UDim2.new(0, 16, 0.62, 0),
         Size = UDim2.fromOffset(185, 28),
+        Visible = false,
         ZIndex = 275,
         Parent = ScreenGui,
     })
@@ -1405,7 +1434,7 @@ function Library:CreateTargetHUD()
         BackgroundColor3 = self.Theme.Background,
         Position = UDim2.new(0.5, 0, 0.72, 0),
         Size = UDim2.fromOffset(236, 66),
-        Visible = true,
+        Visible = false,
         ZIndex = 270,
         Parent = ScreenGui,
     })
@@ -4888,7 +4917,7 @@ function Library:CreateESPPreview(window, targetTab)
     if not window or not window.Main then return end
     local main = window.Main
     local targetTabName = type(targetTab) == "table" and targetTab.Name or tostring(targetTab or "Players ESP")
-    local previewEnabled = true
+    local previewEnabled = false
 
     local panel = self:Create("Frame", {
         Name = "ESPPreviewPanel",
@@ -5271,37 +5300,31 @@ function Library:CreateESPPreview(window, targetTab)
 
     function PreviewObj:Refresh()
         local showBox = Library.Flags["ESP_Box"]
-        if showBox == nil then showBox = true end
-        espBox.Visible = showBox
+        espBox.Visible = (showBox == true)
         espBoxStroke.Color = Library.Flags["ESP_BoxColor"] or Library.Theme.Accent
 
         local showName = Library.Flags["ESP_Name"]
-        if showName == nil then showName = true end
-        espName.Visible = showName
+        espName.Visible = (showName == true)
         espName.TextColor3 = Library.Flags["ESP_NameColor"] or Color3.fromRGB(235, 235, 240)
 
         local showHp = Library.Flags["ESP_Health"]
-        if showHp == nil then showHp = true end
-        hpBarBg.Visible = showHp
+        hpBarBg.Visible = (showHp == true)
 
         local showWeap = Library.Flags["ESP_Weapon"]
-        if showWeap == nil then showWeap = true end
-        espWeapon.Visible = showWeap
+        espWeapon.Visible = (showWeap == true)
         espWeapon.TextColor3 = Library.Flags["ESP_WeaponColor"] or Color3.fromRGB(170, 200, 255)
 
         local showGlow = Library.Flags["ESP_Glow"]
-        if showGlow == nil then showGlow = true end
-        glowAura.Visible = showGlow
+        glowAura.Visible = (showGlow == true)
         glowAura.ImageColor3 = Library.Flags["ESP_GlowColor"] or Color3.fromRGB(225, 55, 110)
 
         local visChams = Library.Flags["Chams_Vis"]
-        if visChams == nil then visChams = true end
         local xqzChams = Library.Flags["Chams_XQZ"]
         local visCol = Library.Flags["Chams_VisCol"] or Library.Theme.Accent
         local xqzCol = Library.Flags["Chams_XQZCol"] or Color3.fromRGB(60, 145, 245)
         local activeHitboxes = Library.Flags["Rage_Hitboxes"]
         for _, bp in ipairs(bodyParts) do
-            local hbSelected = true
+            local hbSelected = false
             if type(activeHitboxes) == "table" then
                 hbSelected = (activeHitboxes[bp.Zone] == true)
             end
@@ -5340,7 +5363,7 @@ function Library:CreateESPPreview(window, targetTab)
             if type(activeFlags) == "table" then
                 lbl.Visible = (activeFlags[key] == true)
             else
-                lbl.Visible = true
+                lbl.Visible = false
             end
         end
     end
@@ -5435,7 +5458,7 @@ function Library:BuildConfigTab(tab)
     local wmToggle = themeGroup:AddToggle({
         Name = "Show Watermark",
         Flag = "UI_ShowWatermark",
-        Default = true,
+        Default = false,
         Callback = function(v)
             if self.Watermark then self.Watermark:SetVisible(v) end
         end
@@ -5444,7 +5467,7 @@ function Library:BuildConfigTab(tab)
     themeGroup:AddToggle({
         Name = "Show Keybind List",
         Flag = "UI_ShowKeybinds",
-        Default = true,
+        Default = false,
         Callback = function(v)
             if self.KeybindList then self.KeybindList:SetVisible(v) end
         end
@@ -5453,7 +5476,7 @@ function Library:BuildConfigTab(tab)
     themeGroup:AddToggle({
         Name = "Show Spectator List",
         Flag = "UI_ShowSpectators",
-        Default = true,
+        Default = false,
         Callback = function(v)
             if self.SpectatorList then self.SpectatorList:SetVisible(v) end
         end
@@ -5462,7 +5485,7 @@ function Library:BuildConfigTab(tab)
     themeGroup:AddToggle({
         Name = "Show Target HUD",
         Flag = "UI_ShowTargetHUD",
-        Default = true,
+        Default = false,
         Callback = function(v)
             if self.TargetHUD then self.TargetHUD:SetVisible(v) end
         end
