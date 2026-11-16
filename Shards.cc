@@ -37,11 +37,12 @@ local Library = {
     Notifications = {},
     OpenPopups = {},
     Folder = "ShardsUI",
-    Font = Enum.Font.Arcade,
-    FontBold = Enum.Font.Arcade,
-    FontScale = 0.85,
+    Font = Enum.Font.Gotham,
+    FontBold = Enum.Font.GothamBold,
+    FontScale = 0.95,
     TextStroke = true,
     FontOrder = {
+        "Minimalist (Gotham / GothamBold)",
         "Pixelated (Arcade 0.85)",
         "Pixelated Micro (Arcade 0.75)",
         "Pixelated Crisp (Silkscreen)",
@@ -56,7 +57,6 @@ local Library = {
         "Heavy Industrial (Sarpanch)",
         "Military Stencil (Jura)",
         "Sci-Fi HUD (Orbitron / Eurostile)",
-        "Minimalist (Gotham / GothamBold)",
         "Terminal DOS (Courier /Monospace)",
     },
     Fonts = {
@@ -250,10 +250,11 @@ function Library:Create(className, props, children)
     return inst
 end
 
-function Library:GetTextBounds(text, baseSize, maxVec)
+function Library:GetTextBounds(text, baseSize, maxVec, isBold)
     local scaledSize = math.max(8, math.floor((baseSize or 12) * self.FontScale + 0.5))
+    local targetFont = isBold and (self.FontBold or self.Font) or self.Font
     local ok, res = pcall(function()
-        return TextService:GetTextSize(tostring(text or ""), scaledSize, self.Font, maxVec or Vector2.new(500, 200))
+        return TextService:GetTextSize(tostring(text or ""), scaledSize, targetFont, maxVec or Vector2.new(500, 200))
     end)
     return ok and res or Vector2.new(#tostring(text or "") * 7, scaledSize + 2)
 end
@@ -2708,7 +2709,7 @@ function GroupboxMethods:AddDivider(textOrCfg, iconName)
     end
 
     local str = string.upper(tostring(text))
-    local bounds = Library:GetTextBounds(str, 10, Vector2.new(300, 20))
+    local bounds = Library:GetTextBounds(str, 10, Vector2.new(300, 20), true)
     local centerWidth = bounds.X + (icon and 24 or 12)
 
     local leftLine = Library:Create("Frame", {
@@ -2775,7 +2776,7 @@ function GroupboxMethods:AddDivider(textOrCfg, iconName)
     Library:BindTheme(rightLine, "BackgroundColor3", "InnerBorder")
     table.insert(Library.LayoutRefreshers, function()
         if not row or not row.Parent then return end
-        local nb = Library:GetTextBounds(str, 10, Vector2.new(300, 20))
+        local nb = Library:GetTextBounds(str, 10, Vector2.new(300, 20), true)
         local cw = nb.X + (icon and 24 or 12)
         center.Size = UDim2.fromOffset(cw, 16)
         leftLine.Size = UDim2.new(0.5, -math.floor(cw / 2) - 4, 0, 1)
@@ -2889,7 +2890,7 @@ local function CreateGroupboxContainer(parentColumn, title, iconName)
 
     -- Classic CS:GO Overlapping Title Pill on the Top Border
     local strTitle = string.upper(tostring(title or "GROUP"))
-    local tBounds = Library:GetTextBounds(strTitle, 11, Vector2.new(250, 20))
+    local tBounds = Library:GetTextBounds(strTitle, 11, Vector2.new(250, 20), true)
     local headerW = tBounds.X + (iconName and 26 or 12)
 
     local headerBadge = Library:Create("Frame", {
@@ -2903,7 +2904,7 @@ local function CreateGroupboxContainer(parentColumn, title, iconName)
     Library:BindTheme(headerBadge, "BackgroundColor3", "Groupbox")
     table.insert(Library.LayoutRefreshers, function()
         if not headerBadge or not headerBadge.Parent then return end
-        local nb = Library:GetTextBounds(strTitle, 11, Vector2.new(250, 20))
+        local nb = Library:GetTextBounds(strTitle, 11, Vector2.new(250, 20), true)
         headerBadge.Size = UDim2.fromOffset(nb.X + (iconName and 26 or 12), 14)
     end)
 
@@ -3692,7 +3693,7 @@ function Library:BuildConfigTab(tab)
         Flag = "UI_FontPreset",
         Searchable = true,
         Values = self.FontOrder,
-        Default = "Pixelated (Arcade 0.85)",
+        Default = "Minimalist (Gotham / GothamBold)",
         Callback = function(choice)
             self:SetFontPreset(choice)
             if fontScaleSlider then
