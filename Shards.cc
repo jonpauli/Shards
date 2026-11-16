@@ -1845,9 +1845,9 @@ function GroupboxMethods:AddToggle(cfg)
 
     -- Outer Glow around the square box when lit up
     local boxGlow = Library:Create("ImageLabel", {
-        AnchorPoint = Vector2.new(0.5, 0.5),
+        AnchorPoint = Vector2.new(0, 0),
         BackgroundTransparency = 1,
-        Position = UDim2.new(0, 8, 0.5, 0),
+        Position = UDim2.fromOffset(-4, -2),
         Size = UDim2.fromOffset(24, 24),
         Image = "rbxassetid://5028857084",
         ImageColor3 = risky and Library.Theme.Risky or Library.Theme.Accent,
@@ -1856,11 +1856,11 @@ function GroupboxMethods:AddToggle(cfg)
         Parent = row,
     })
 
-    -- The 14x14 CS:GO Square Box (even pixel size so 0.5 AnchorPoint centers without 0.5px subpixel rounding)
+    -- The 14x14 CS:GO Square Box (top-left anchored at integer offsets to prevent fractional column subpixel rounding)
     local boxBase = Library:Create("Frame", {
-        AnchorPoint = Vector2.new(0.5, 0.5),
+        AnchorPoint = Vector2.new(0, 0),
         BackgroundColor3 = Library.Theme.Element,
-        Position = UDim2.new(0, 8, 0.5, 0),
+        Position = UDim2.fromOffset(1, 3),
         Size = UDim2.fromOffset(14, 14),
         ZIndex = 10,
         Parent = row,
@@ -1868,13 +1868,13 @@ function GroupboxMethods:AddToggle(cfg)
     Library:BindTheme(boxBase, "BackgroundColor3", "Element")
     local boxStroke = Library:ApplyCSBorder(boxBase, "InnerBorder")
 
-    -- Lit-up interior fill (scales & fades smoothly when toggled on)
+    -- Lit-up interior fill (locked to 100% of boxBase with 0,0 anchor so it never shifts off-center)
     local boxFill = Library:Create("Frame", {
-        AnchorPoint = Vector2.new(0.5, 0.5),
+        AnchorPoint = Vector2.new(0, 0),
         BackgroundColor3 = Color3.new(1, 1, 1),
         BorderSizePixel = 0,
-        Position = UDim2.fromScale(0.5, 0.5),
-        Size = state and UDim2.fromScale(1, 1) or UDim2.fromScale(0, 0),
+        Position = UDim2.fromOffset(0, 0),
+        Size = UDim2.fromScale(1, 1),
         BackgroundTransparency = state and 0 or 1,
         ZIndex = 11,
         Parent = boxBase,
@@ -1947,7 +1947,6 @@ function GroupboxMethods:AddToggle(cfg)
 
         if state then
             Library:Tween(boxFill, TweenFast, {
-                Size = UDim2.fromScale(1, 1),
                 BackgroundTransparency = 0,
             })
             Library:Tween(boxGlow, TweenMedium, { ImageTransparency = 0.52 })
@@ -1960,7 +1959,6 @@ function GroupboxMethods:AddToggle(cfg)
             end
         else
             Library:Tween(boxFill, TweenFast, {
-                Size = UDim2.fromScale(0, 0),
                 BackgroundTransparency = 1,
             })
             Library:Tween(boxGlow, TweenMedium, { ImageTransparency = 1 })
@@ -3500,12 +3498,20 @@ local function CreateTabboxContainer(parentColumn, title)
 
     local box = Library:Create("Frame", {
         BackgroundColor3 = Library.Theme.Groupbox,
-        Size = UDim2.fromScale(1, 1),
+        Position = UDim2.fromOffset(0, 7),
+        Size = UDim2.new(1, 0, 1, -7),
         ZIndex = 6,
         Parent = wrapper,
     })
     Library:BindTheme(box, "BackgroundColor3", "Groupbox")
-    Library:ApplyCSBorder(box, "InnerBorder")
+    local boxStroke = Library:ApplyCSBorder(box, "InnerBorder")
+
+    Library:Connect(box.MouseEnter, function()
+        Library:Tween(boxStroke, TweenFast, { Color = Library.Theme.HighlightBorder })
+    end)
+    Library:Connect(box.MouseLeave, function()
+        Library:Tween(boxStroke, TweenFast, { Color = Library.Theme.InnerBorder })
+    end)
 
     local tabHeaderBar = Library:Create("Frame", {
         BackgroundColor3 = Library.Theme.Sidebar,
@@ -3549,7 +3555,7 @@ local function CreateTabboxContainer(parentColumn, title)
             local h = Tabbox.ActiveTab.Layout.AbsoluteContentSize.Y
             Tabbox.ActiveTab.Container.Size = UDim2.new(1, -20, 0, h)
             Library:Tween(wrapper, TweenFast, {
-                Size = UDim2.new(1, 0, 0, h + 42)
+                Size = UDim2.new(1, 0, 0, h + 49)
             })
         end
     end
@@ -3573,7 +3579,7 @@ local function CreateTabboxContainer(parentColumn, title)
             BackgroundColor3 = Library.Theme.Accent,
             BorderSizePixel = 0,
             Position = UDim2.fromScale(0.5, 0),
-            Size = UDim2.new(0, 0, 0, 2),
+            Size = UDim2.new(0, 0, 0, 1),
             BackgroundTransparency = 1,
             ZIndex = 9,
             Parent = btn,
@@ -3617,7 +3623,7 @@ local function CreateTabboxContainer(parentColumn, title)
                     TextColor3 = Library.Theme.TextDim,
                 })
                 Library:Tween(other.TopLine, TweenFast, {
-                    Size = UDim2.new(0, 0, 0, 2),
+                    Size = UDim2.new(0, 0, 0, 1),
                     BackgroundTransparency = 1,
                 })
             end
@@ -3630,7 +3636,7 @@ local function CreateTabboxContainer(parentColumn, title)
                 TextColor3 = Library.Theme.Text,
             })
             Library:Tween(topLine, TweenMedium, {
-                Size = UDim2.new(1, 0, 0, 2),
+                Size = UDim2.new(1, 0, 0, 1),
                 BackgroundTransparency = 0,
             })
             UpdateWrapperHeight()
@@ -3694,6 +3700,7 @@ function Library:CreateWindow(cfg)
 
     local openToken = 0
     local savedWinPos = main.Position
+    local resizeStartTopLeft = Vector2.zero
 
     -- Classic CS:GO 2px Top Gradient Accent Strip
     self:CreateAccentBar(main, 10)
@@ -3948,6 +3955,7 @@ function Library:CreateWindow(cfg)
     local resizing = false
     local resizeStartMouse = Vector2.zero
     local resizeStartSize = Vector2.zero
+    local resizeStartPos = UDim2.new()
 
     self:Connect(resizeGrip.MouseEnter, function()
         for _, d in ipairs(gripDots) do
@@ -3966,14 +3974,37 @@ function Library:CreateWindow(cfg)
             resizing = true
             resizeStartMouse = Vector2.new(input.Position.X, input.Position.Y)
             resizeStartSize = main.AbsoluteSize
+            resizeStartTopLeft = main.AbsolutePosition
+            resizeStartPos = main.Position
+            self:ClosePopups()
         end
     end)
     self:Connect(UserInputService.InputChanged, function(input)
         if resizing and input.UserInputType == Enum.UserInputType.MouseMovement then
             local delta = Vector2.new(input.Position.X, input.Position.Y) - resizeStartMouse
-            local newW = math.clamp(resizeStartSize.X + delta.X, 580, 1100)
-            local newH = math.clamp(resizeStartSize.Y + delta.Y, 440, 850)
+            local newW = math.floor((math.clamp(resizeStartSize.X + delta.X, 580, 1100) + 1) / 2) * 2
+            local newH = math.floor((math.clamp(resizeStartSize.Y + delta.Y, 440, 850) + 1) / 2) * 2
+            local dw = newW - resizeStartSize.X
+            local dh = newH - resizeStartSize.Y
+            local nextPos = UDim2.new(
+                resizeStartPos.X.Scale,
+                math.floor(resizeStartPos.X.Offset + dw * 0.5 + 0.5),
+                resizeStartPos.Y.Scale,
+                math.floor(resizeStartPos.Y.Offset + dh * 0.5 + 0.5)
+            )
             main.Size = UDim2.fromOffset(newW, newH)
+            main.Position = nextPos
+            local curTL = main.AbsolutePosition
+            local errX = math.floor((resizeStartTopLeft.X - curTL.X) + 0.5)
+            local errY = math.floor((resizeStartTopLeft.Y - curTL.Y) + 0.5)
+            if errX ~= 0 or errY ~= 0 then
+                nextPos = UDim2.new(nextPos.X.Scale, nextPos.X.Offset + errX, nextPos.Y.Scale, nextPos.Y.Offset + errY)
+                main.Position = nextPos
+            end
+            savedWinPos = nextPos
+            if Window.ESPPreview and Window.ESPPreview.SyncPosition then
+                Window.ESPPreview:SyncPosition(false)
+            end
         end
     end)
     self:Connect(UserInputService.InputEnded, function(input)
@@ -4544,22 +4575,23 @@ function Library:CreateESPPreview(window, targetTab)
         local absSize = main.AbsoluteSize
         local insetY = self:GetGuiInsetY()
         local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1920, 1080)
-        local px = absPos.X + absSize.X + 10
+        local px = math.floor(absPos.X + absSize.X + 10 + 0.5)
         if px + 210 > vp.X then
-            px = math.max(6, absPos.X - 215)
+            px = math.max(6, math.floor(absPos.X - 215 + 0.5))
         end
-        local py = absPos.Y + insetY
+        local py = math.floor(absPos.Y + insetY + 0.5)
         if animate then
             panel.Position = UDim2.fromOffset(px - 6, py)
             Library:Tween(panel, TweenMedium, { Position = UDim2.fromOffset(px, py) })
         else
-            Library:Tween(panel, TweenInfo.new(0.06, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-                Position = UDim2.fromOffset(px, py)
-            })
+            panel.Position = UDim2.fromOffset(px, py)
         end
     end
 
     local PreviewObj = { Frame = panel }
+    function PreviewObj:SyncPosition(animate)
+        SyncPosition(animate)
+    end
 
     function PreviewObj:Refresh()
         local showBox = Library.Flags["ESP_Box"]
