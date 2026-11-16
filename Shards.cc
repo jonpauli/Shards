@@ -33,6 +33,10 @@ local Library = {
     ThemeObjects = {},
     TextObjects = {},
     LayoutRefreshers = {},
+    SearchEntries = {},
+    SearchQuery = "",
+    CopiedColor = Color3.fromRGB(155, 195, 55),
+    CopiedAlpha = 0,
     ActiveKeybinds = {},
     Notifications = {},
     OpenPopups = {},
@@ -43,39 +47,17 @@ local Library = {
     TextStroke = true,
     FontOrder = {
         "Minimalist (Gotham / GothamBold)",
-        "Pixelated (Arcade 0.85)",
-        "Pixelated Micro (Arcade 0.75)",
-        "Pixelated Crisp (Silkscreen)",
-        "Pixelated 8-Bit (PressStart2P)",
         "Skeet Classic (Code / Inconsolata)",
         "CS2 Console (RobotoMono)",
-        "Neverlose Clean (Ubuntu)",
         "Gamesense Tahoma (Legacy)",
-        "Tactical Condensed (RobotoCondensed)",
-        "Modern Tech (Michroma)",
-        "Sharp Sans (Arial /ArialBold)",
-        "Heavy Industrial (Sarpanch)",
-        "Military Stencil (Jura)",
-        "Sci-Fi HUD (Orbitron / Eurostile)",
-        "Terminal DOS (Courier /Monospace)",
+        "Pixelated (Arcade 0.85)",
     },
     Fonts = {
-        ["Pixelated (Arcade 0.85)"]           = { Font = Enum.Font.Arcade,          Bold = Enum.Font.Arcade,          Scale = 0.85 },
-        ["Pixelated Micro (Arcade 0.75)"]     = { Font = Enum.Font.Arcade,          Bold = Enum.Font.Arcade,          Scale = 0.75 },
-        ["Pixelated Crisp (Silkscreen)"]      = { Family = "rbxasset://fonts/families/Silkscreen.json",   Scale = 0.88, Fallback = Enum.Font.Arcade },
-        ["Pixelated 8-Bit (PressStart2P)"]    = { Family = "rbxasset://fonts/families/PressStart2P.json", Scale = 0.72, Fallback = Enum.Font.Arcade },
+        ["Minimalist (Gotham / GothamBold)"]  = { Font = Enum.Font.Gotham,          Bold = Enum.Font.GothamBold,      Scale = 0.95 },
         ["Skeet Classic (Code / Inconsolata)"]= { Font = Enum.Font.Code,            Bold = Enum.Font.GothamBold,      Scale = 1.00 },
         ["CS2 Console (RobotoMono)"]          = { Font = Enum.Font.RobotoMono,      Bold = Enum.Font.RobotoMono,      Scale = 1.00 },
-        ["Neverlose Clean (Ubuntu)"]          = { Font = Enum.Font.Ubuntu,          Bold = Enum.Font.Ubuntu,          Scale = 0.96 },
         ["Gamesense Tahoma (Legacy)"]         = { Font = Enum.Font.Legacy,          Bold = Enum.Font.Legacy,          Scale = 0.90 },
-        ["Tactical Condensed (RobotoCondensed)"] = { Font = Enum.Font.RobotoCondensed, Bold = Enum.Font.RobotoCondensed, Scale = 1.02 },
-        ["Modern Tech (Michroma)"]            = { Font = Enum.Font.Michroma,        Bold = Enum.Font.Michroma,        Scale = 0.82 },
-        ["Sharp Sans (Arial /ArialBold)"]     = { Font = Enum.Font.Arial,           Bold = Enum.Font.ArialBold,       Scale = 0.95 },
-        ["Heavy Industrial (Sarpanch)"]       = { Font = Enum.Font.Sarpanch,        Bold = Enum.Font.Sarpanch,        Scale = 1.00 },
-        ["Military Stencil (Jura)"]           = { Font = Enum.Font.Jura,            Bold = Enum.Font.Jura,            Scale = 1.02 },
-        ["Sci-Fi HUD (Orbitron / Eurostile)"] = { Font = Enum.Font.SciFi,           Bold = Enum.Font.SciFi,           Scale = 0.95 },
-        ["Minimalist (Gotham / GothamBold)"]  = { Font = Enum.Font.Gotham,          Bold = Enum.Font.GothamBold,      Scale = 0.95 },
-        ["Terminal DOS (Courier /Monospace)"] = { Family = "rbxasset://fonts/families/Inconsolata.json",  Scale = 1.00, Fallback = Enum.Font.Code },
+        ["Pixelated (Arcade 0.85)"]           = { Font = Enum.Font.Arcade,          Bold = Enum.Font.Arcade,          Scale = 0.85 },
     },
     Theme = {
         Background       = Color3.fromRGB(11, 11, 14),
@@ -384,6 +366,11 @@ function Library:ApplyCSBorder(frame, highlightKey)
     })
     self:BindTheme(innerStroke, "Color", highlightKey or "InnerBorder")
 
+    local borderFolder = self:Create("Folder", {
+        Name = "CSBorderFolder",
+        Parent = frame,
+    })
+
     local outerWrap = self:Create("Frame", {
         Name = "OuterBorder",
         BackgroundTransparency = 1,
@@ -391,7 +378,7 @@ function Library:ApplyCSBorder(frame, highlightKey)
         Position = UDim2.new(0, -1, 0, -1),
         Size = UDim2.new(1, 2, 1, 2),
         ZIndex = math.max(1, frame.ZIndex - 1),
-        Parent = frame,
+        Parent = borderFolder,
     })
     pcall(function() outerWrap.Interactable = false end)
     local blackStroke = self:Create("UIStroke", {
@@ -402,6 +389,35 @@ function Library:ApplyCSBorder(frame, highlightKey)
     })
     self:BindTheme(blackStroke, "Color", "OuterBorder")
     return innerStroke, blackStroke
+end
+
+function Library:RegisterSearchable(holder, textLabel, name)
+    local entry = {
+        Holder = holder,
+        Label = textLabel,
+        Name = string.lower(tostring(name or "")),
+        DefaultColor = textLabel and textLabel.TextColor3 or self.Theme.TextDim,
+    }
+    table.insert(self.SearchEntries, entry)
+    return entry
+end
+
+function Library:ApplyGlobalSearch(query)
+    local q = string.lower(string.gsub(tostring(query or ""), "^%s*(.-)%s*$", "%1"))
+    self.SearchQuery = q
+    for i = #self.SearchEntries, 1, -1 do
+        local entry = self.SearchEntries[i]
+        if entry.Holder and entry.Holder.Parent then
+            if q == "" then
+                entry.Holder.Visible = true
+            else
+                local matched = string.find(entry.Name, q, 1, true) ~= nil
+                entry.Holder.Visible = matched
+            end
+        else
+            table.remove(self.SearchEntries, i)
+        end
+    end
 end
 
 -- Creates the signature CS:GO top accent gradient bar (Skeet / Gamesense style)
@@ -973,7 +989,7 @@ function Library:CreateKeybindAttachment(parentRow, cfg, toggleLink)
     -- Mode Popup (Hold / Toggle / Always)
     local modePopup = self:Create("Frame", {
         BackgroundColor3 = self.Theme.Background,
-        Size = UDim2.fromOffset(78, 60),
+        Size = UDim2.fromOffset(78, 62),
         Visible = false,
         ZIndex = 350,
         Parent = ScreenGui,
@@ -981,9 +997,17 @@ function Library:CreateKeybindAttachment(parentRow, cfg, toggleLink)
     self:BindTheme(modePopup, "BackgroundColor3", "Background")
     self:ApplyCSBorder(modePopup, "HighlightBorder")
 
+    local modeList = self:Create("Frame", {
+        BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(1, 1),
+        Size = UDim2.new(1, -2, 1, -2),
+        ZIndex = 351,
+        Parent = modePopup,
+    })
+
     self:Create("UIListLayout", {
         SortOrder = Enum.SortOrder.LayoutOrder,
-        Parent = modePopup,
+        Parent = modeList,
     })
 
     local popupCtrl = {
@@ -1001,7 +1025,7 @@ function Library:CreateKeybindAttachment(parentRow, cfg, toggleLink)
     local modeButtons = {}
     for _, m in ipairs(modes) do
         local mBtn = self:Create("TextButton", {
-            BackgroundColor3 = self.Theme.Background,
+            BackgroundColor3 = self.Theme.ElementHover,
             BackgroundTransparency = 1,
             AutoButtonColor = false,
             Size = UDim2.new(1, 0, 0, 20),
@@ -1010,16 +1034,18 @@ function Library:CreateKeybindAttachment(parentRow, cfg, toggleLink)
             TextColor3 = (m == mode) and self.Theme.Accent or self.Theme.TextDim,
             TextSize = 12,
             TextXAlignment = Enum.TextXAlignment.Left,
-            ZIndex = 351,
-            Parent = modePopup,
+            ZIndex = 352,
+            Parent = modeList,
         })
         modeButtons[m] = mBtn
         self:Connect(mBtn.MouseEnter, function()
+            Library:Tween(mBtn, TweenFast, { BackgroundTransparency = 0.35 })
             if m ~= mode then
                 Library:Tween(mBtn, TweenFast, { TextColor3 = self.Theme.Text })
             end
         end)
         self:Connect(mBtn.MouseLeave, function()
+            Library:Tween(mBtn, TweenFast, { BackgroundTransparency = 1 })
             if m ~= mode then
                 Library:Tween(mBtn, TweenFast, { TextColor3 = self.Theme.TextDim })
             end
@@ -1211,7 +1237,7 @@ function Library:CreateColorPickerAttachment(parentRow, cfg)
     local popup = self:Create("Frame", {
         Name = "ColorPopup",
         BackgroundColor3 = self.Theme.Background,
-        Size = UDim2.fromOffset(215, 214),
+        Size = UDim2.fromOffset(215, 238),
         Visible = false,
         ZIndex = 360,
         Parent = ScreenGui,
@@ -1363,6 +1389,37 @@ function Library:CreateColorPickerAttachment(parentRow, cfg)
     self:BindTheme(rbBtn, "BackgroundColor3", "Element")
     self:ApplyCSBorder(rbBtn, "InnerBorder")
 
+    -- Copy & Paste Color Buttons inside Popup
+    local copyBtn = self:Create("TextButton", {
+        BackgroundColor3 = self.Theme.Element,
+        AutoButtonColor = false,
+        Position = UDim2.fromOffset(8, 208),
+        Size = UDim2.fromOffset(96, 20),
+        Font = Enum.Font.Code,
+        Text = "COPY COLOR",
+        TextColor3 = self.Theme.TextDim,
+        TextSize = 11,
+        ZIndex = 362,
+        Parent = popup,
+    })
+    self:BindTheme(copyBtn, "BackgroundColor3", "Element")
+    local copyStroke = self:ApplyCSBorder(copyBtn, "InnerBorder")
+
+    local pasteBtn = self:Create("TextButton", {
+        BackgroundColor3 = self.Theme.Element,
+        AutoButtonColor = false,
+        Position = UDim2.fromOffset(110, 208),
+        Size = UDim2.fromOffset(96, 20),
+        Font = Enum.Font.Code,
+        Text = "PASTE COLOR",
+        TextColor3 = self.Theme.TextDim,
+        TextSize = 11,
+        ZIndex = 362,
+        Parent = popup,
+    })
+    self:BindTheme(pasteBtn, "BackgroundColor3", "Element")
+    local pasteStroke = self:ApplyCSBorder(pasteBtn, "InnerBorder")
+
     local function ToHex(c)
         return string.format("#%02X%02X%02X",
             math.floor(c.R * 255 + 0.5),
@@ -1383,6 +1440,9 @@ function Library:CreateColorPickerAttachment(parentRow, cfg)
         alphaCursor.Position = UDim2.new(1 - alpha, 0, 0.5, 0)
         hexInput.Text = ToHex(col)
         Library.Flags[flag] = col
+        if Library.ESPPreview then
+            Library.ESPPreview:Refresh()
+        end
         if cfg.Callback then
             task.spawn(cfg.Callback, col, alpha)
         end
@@ -1461,6 +1521,57 @@ function Library:CreateColorPickerAttachment(parentRow, cfg)
         rbBtn.TextColor3 = rainbow and self.Theme.Accent or self.Theme.TextDim
     end)
 
+    self:Connect(copyBtn.MouseEnter, function()
+        Library:Tween(copyStroke, TweenFast, { Color = self.Theme.Accent })
+        Library:Tween(copyBtn, TweenFast, { TextColor3 = self.Theme.Text })
+    end)
+    self:Connect(copyBtn.MouseLeave, function()
+        Library:Tween(copyStroke, TweenFast, { Color = self.Theme.InnerBorder })
+        Library:Tween(copyBtn, TweenFast, { TextColor3 = self.Theme.TextDim })
+    end)
+    self:Connect(copyBtn.MouseButton1Click, function()
+        Library.CopiedColor = ColorPicker.Value
+        Library.CopiedAlpha = ColorPicker.Alpha
+        pcall(function()
+            if setclipboard then
+                setclipboard(ToHex(ColorPicker.Value))
+            end
+        end)
+        copyBtn.Text = "COPIED!"
+        copyBtn.TextColor3 = self.Theme.Accent
+        task.delay(0.75, function()
+            if copyBtn and copyBtn.Parent then
+                copyBtn.Text = "COPY COLOR"
+                copyBtn.TextColor3 = self.Theme.TextDim
+            end
+        end)
+    end)
+
+    self:Connect(pasteBtn.MouseEnter, function()
+        Library:Tween(pasteStroke, TweenFast, { Color = self.Theme.Accent })
+        Library:Tween(pasteBtn, TweenFast, { TextColor3 = self.Theme.Text })
+    end)
+    self:Connect(pasteBtn.MouseLeave, function()
+        Library:Tween(pasteStroke, TweenFast, { Color = self.Theme.InnerBorder })
+        Library:Tween(pasteBtn, TweenFast, { TextColor3 = self.Theme.TextDim })
+    end)
+    self:Connect(pasteBtn.MouseButton1Click, function()
+        if Library.CopiedColor then
+            rainbow = false
+            ColorPicker.Rainbow = false
+            rbBtn.TextColor3 = self.Theme.TextDim
+            ColorPicker:Set(Library.CopiedColor, Library.CopiedAlpha or 0)
+            pasteBtn.Text = "PASTED!"
+            pasteBtn.TextColor3 = self.Theme.Accent
+            task.delay(0.75, function()
+                if pasteBtn and pasteBtn.Parent then
+                    pasteBtn.Text = "PASTE COLOR"
+                    pasteBtn.TextColor3 = self.Theme.TextDim
+                end
+            end)
+        end
+    end)
+
     self:Connect(RunService.RenderStepped, function()
         if rainbow and not self.Unloaded then
             h = (os.clock() * 0.22) % 1
@@ -1477,7 +1588,7 @@ function Library:CreateColorPickerAttachment(parentRow, cfg)
             local insetY = self:GetGuiInsetY()
             local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1920, 1080)
             local px = math.clamp(abs.X - 185, 6, math.max(6, vp.X - 225))
-            local py = math.clamp(abs.Y + insetY + 18, 6, math.max(6, vp.Y - 225))
+            local py = math.clamp(abs.Y + insetY + 18, 6, math.max(6, vp.Y - 246))
             popup.Position = UDim2.fromOffset(px, py)
             popup.Visible = true
         end
@@ -1599,6 +1710,7 @@ function GroupboxMethods:AddToggle(cfg)
         ZIndex = 10,
         Parent = row,
     })
+    Library:RegisterSearchable(row, label, name)
 
     -- Right-side attachment tray (for Keybinds & ColorPickers)
     local attachTray = Library:Create("Frame", {
@@ -1658,6 +1770,12 @@ function GroupboxMethods:AddToggle(cfg)
         Toggle.Value = state
         Library.Flags[flag] = state
         UpdateVisuals()
+        if Toggle.SubSection then
+            Toggle.SubSection:UpdateState(state)
+        end
+        if Library.ESPPreview then
+            Library.ESPPreview:Refresh()
+        end
         if cfg.Callback then
             task.spawn(cfg.Callback, state)
         end
@@ -1676,6 +1794,88 @@ function GroupboxMethods:AddToggle(cfg)
         return Library:CreateColorPickerAttachment(attachTray, cpCfg)
     end
 
+    local parentGroupbox = self
+    function Toggle:AddSubSection()
+        if Toggle.SubSection then
+            return Toggle.SubSection
+        end
+        local depWrapper = Library:Create("Frame", {
+            Name = "Dep_" .. name,
+            BackgroundTransparency = 1,
+            ClipsDescendants = true,
+            Size = UDim2.new(1, 0, 0, 0),
+            Visible = state,
+            ZIndex = 10,
+            Parent = parentGroupbox.Container,
+        })
+        local depBar = Library:Create("Frame", {
+            BackgroundColor3 = Library.Theme.Accent,
+            BorderSizePixel = 0,
+            Position = UDim2.fromOffset(5, 2),
+            Size = UDim2.new(0, 1, 1, -4),
+            BackgroundTransparency = 0.35,
+            ZIndex = 11,
+            Parent = depWrapper,
+        })
+        Library:BindTheme(depBar, "BackgroundColor3", "Accent")
+
+        local depContainer = Library:Create("Frame", {
+            Name = "DepContainer",
+            BackgroundTransparency = 1,
+            Position = UDim2.fromOffset(14, 0),
+            Size = UDim2.new(1, -14, 0, 0),
+            ZIndex = 11,
+            Parent = depWrapper,
+        })
+        local depLayout = Library:Create("UIListLayout", {
+            Padding = UDim.new(0, 6),
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            Parent = depContainer,
+        })
+        local subToken = 0
+        local function SyncSubHeight(animate)
+            local h = depLayout.AbsoluteContentSize.Y
+            depContainer.Size = UDim2.new(1, -14, 0, h)
+            subToken += 1
+            local tok = subToken
+            if state then
+                depWrapper.Visible = true
+                if animate then
+                    Library:Tween(depWrapper, TweenFast, { Size = UDim2.new(1, 0, 0, h) })
+                else
+                    depWrapper.Size = UDim2.new(1, 0, 0, h)
+                end
+            else
+                if animate then
+                    Library:Tween(depWrapper, TweenFast, { Size = UDim2.new(1, 0, 0, 0) })
+                    task.delay(0.14, function()
+                        if subToken == tok and not state then
+                            depWrapper.Visible = false
+                        end
+                    end)
+                else
+                    depWrapper.Size = UDim2.new(1, 0, 0, 0)
+                    depWrapper.Visible = false
+                end
+            end
+        end
+        Library:Connect(depLayout:GetPropertyChangedSignal("AbsoluteContentSize"), function()
+            SyncSubHeight(false)
+        end)
+
+        local subObj = setmetatable({
+            Wrapper = depWrapper,
+            Container = depContainer,
+            UpdateState = function(_, newState)
+                state = newState
+                SyncSubHeight(true)
+            end,
+        }, GroupboxMethods)
+        Toggle.SubSection = subObj
+        SyncSubHeight(false)
+        return subObj
+    end
+    Toggle.AddDepbox = Toggle.AddSubSection
     Library:Connect(clickBtn.MouseEnter, function()
         if not state then
             Library:Tween(boxStroke, TweenFast, { Color = Library.Theme.HighlightBorder })
@@ -1741,6 +1941,7 @@ function GroupboxMethods:AddSlider(cfg)
         Parent = holder,
     })
     Library:BindTheme(topLabel, "TextColor3", "TextDim")
+    Library:RegisterSearchable(holder, topLabel, name)
 
     local valLabel = Library:Create("TextLabel", {
         BackgroundTransparency = 1,
@@ -1944,6 +2145,7 @@ function GroupboxMethods:AddDropdown(cfg)
         Parent = holder,
     })
     Library:BindTheme(titleLbl, "TextColor3", "TextDim")
+    Library:RegisterSearchable(holder, titleLbl, name)
 
     -- Single Unified Dropdown Box (expands downward as 1 whole bordered frame instead of 2 separate boxes)
     local dropBox = Library:Create("Frame", {
@@ -2205,6 +2407,9 @@ function GroupboxMethods:AddDropdown(cfg)
                         Library.Flags[flag] = selected
                         UpdateDisplayText()
                         RebuildItems()
+                        if Library.ESPPreview then
+                            Library.ESPPreview:Refresh()
+                        end
                         if cfg.Callback then
                             task.spawn(cfg.Callback, selected)
                         end
@@ -2220,6 +2425,9 @@ function GroupboxMethods:AddDropdown(cfg)
                         UpdateDisplayText()
                         RebuildItems()
                         popupCtrl.Close()
+                        if Library.ESPPreview then
+                            Library.ESPPreview:Refresh()
+                        end
                         if cfg.Callback then
                             task.spawn(cfg.Callback, selected)
                         end
@@ -2285,6 +2493,9 @@ function GroupboxMethods:AddDropdown(cfg)
         Library.Flags[flag] = selected
         UpdateDisplayText()
         RebuildItems()
+        if Library.ESPPreview then
+            Library.ESPPreview:Refresh()
+        end
         if cfg.Callback then
             task.spawn(cfg.Callback, selected)
         end
@@ -2402,6 +2613,7 @@ function GroupboxMethods:AddListbox(cfg)
         Parent = holder,
     })
     Library:BindTheme(titleLbl, "TextColor3", "TextDim")
+    Library:RegisterSearchable(holder, titleLbl, name)
 
     local frame = Library:Create("Frame", {
         BackgroundColor3 = Library.Theme.Element,
@@ -2613,6 +2825,7 @@ function GroupboxMethods:AddButton(cfg)
 
     local mainBtn = BuildButtonInstance(cfg, 0, 1, 1, -2)
     local ButtonObj = { Instance = mainBtn }
+    Library:RegisterSearchable(row, nil, name)
 
     -- Allows chaining a side-by-side CS:GO split button: Btn:AddButton({ Name = "Reset", Callback = ... })
     function ButtonObj:AddButton(subCfg)
@@ -2661,6 +2874,7 @@ function GroupboxMethods:AddInput(cfg)
         Parent = holder,
     })
     Library:BindTheme(titleLbl, "TextColor3", "TextDim")
+    Library:RegisterSearchable(holder, titleLbl, name)
 
     local boxWrap = Library:Create("Frame", {
         BackgroundColor3 = Library.Theme.Element,
@@ -3224,7 +3438,7 @@ function Library:CreateWindow(cfg)
     local titleLabel = self:Create("TextLabel", {
         BackgroundTransparency = 1,
         Position = UDim2.fromOffset(30, 0),
-        Size = UDim2.new(0.5, 0, 1, 0),
+        Size = UDim2.new(0, 130, 1, 0),
         Font = Enum.Font.GothamBold,
         Text = string.upper(self.Title),
         TextColor3 = self.Theme.Text,
@@ -3235,10 +3449,63 @@ function Library:CreateWindow(cfg)
     })
     self:BindTheme(titleLabel, "TextColor3", "Text")
 
+    -- Global Top-Bar Search Box
+    local globalSearchWrap = self:Create("Frame", {
+        AnchorPoint = Vector2.new(0, 0.5),
+        BackgroundColor3 = self.Theme.Element,
+        Position = UDim2.new(0, 149, 0.5, 0),
+        Size = UDim2.fromOffset(180, 18),
+        ZIndex = 6,
+        Parent = topBar,
+    })
+    self:BindTheme(globalSearchWrap, "BackgroundColor3", "Element")
+    local globalSearchStroke = self:ApplyCSBorder(globalSearchWrap, "InnerBorder")
+
+    local globalSearchIcon = self:Create("ImageLabel", {
+        AnchorPoint = Vector2.new(0, 0.5),
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, 5, 0.5, 0),
+        Size = UDim2.fromOffset(11, 11),
+        Image = self:GetIcon("search"),
+        ImageColor3 = self.Theme.TextMuted,
+        ZIndex = 7,
+        Parent = globalSearchWrap,
+    })
+    self:BindTheme(globalSearchIcon, "ImageColor3", "TextMuted")
+
+    local globalSearchBox = self:Create("TextBox", {
+        BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(20, 0),
+        Size = UDim2.new(1, -24, 1, 0),
+        Font = Enum.Font.Code,
+        Text = "",
+        PlaceholderText = "Search controls...",
+        PlaceholderColor3 = self.Theme.TextMuted,
+        TextColor3 = self.Theme.Text,
+        TextSize = 11,
+        ClearTextOnFocus = false,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 7,
+        Parent = globalSearchWrap,
+    })
+    self:BindTheme(globalSearchBox, "TextColor3", "Text")
+
+    self:Connect(globalSearchBox.Focused, function()
+        Library:Tween(globalSearchStroke, TweenFast, { Color = self.Theme.Accent })
+        Library:Tween(globalSearchIcon, TweenFast, { ImageColor3 = self.Theme.Accent })
+    end)
+    self:Connect(globalSearchBox.FocusLost, function()
+        Library:Tween(globalSearchStroke, TweenFast, { Color = self.Theme.InnerBorder })
+        Library:Tween(globalSearchIcon, TweenFast, { ImageColor3 = self.Theme.TextMuted })
+    end)
+    self:Connect(globalSearchBox:GetPropertyChangedSignal("Text"), function()
+        self:ApplyGlobalSearch(globalSearchBox.Text)
+    end)
+
     local rightBadge = self:Create("TextLabel", {
         BackgroundTransparency = 1,
-        Position = UDim2.new(0.5, 0, 0, 0),
-        Size = UDim2.new(0.5, -10, 1, 0),
+        Position = UDim2.fromOffset(335, 0),
+        Size = UDim2.new(1, -345, 1, 0),
         Font = Enum.Font.Code,
         Text = subTitle .. "  [" .. self:FormatKey(self.ToggleKey) .. "]",
         TextColor3 = self.Theme.TextMuted,
@@ -3338,7 +3605,7 @@ function Library:CreateWindow(cfg)
     local footRight = self:Create("TextLabel", {
         BackgroundTransparency = 1,
         Position = UDim2.new(0.5, 0, 0, 0),
-        Size = UDim2.new(0.5, -10, 1, 0),
+        Size = UDim2.new(0.5, -24, 1, 0),
         Font = Enum.Font.Code,
         Text = "status: undetected / active",
         TextColor3 = self.Theme.Accent,
@@ -3349,16 +3616,91 @@ function Library:CreateWindow(cfg)
     })
     self:BindTheme(footRight, "TextColor3", "Accent")
 
+    -- Bottom-Right Diagonal CS:GO Window Resize Grip
+    local resizeGrip = self:Create("TextButton", {
+        Name = "ResizeGrip",
+        AnchorPoint = Vector2.new(1, 1),
+        BackgroundTransparency = 1,
+        AutoButtonColor = false,
+        Position = UDim2.new(1, -2, 1, -2),
+        Size = UDim2.fromOffset(16, 16),
+        Text = "",
+        ZIndex = 12,
+        Parent = main,
+    })
+    local gripDots = {}
+    local dotCoords = {
+        { 11, 11 },
+        { 7, 11 }, { 11, 7 },
+        { 3, 11 }, { 7, 7 }, { 11, 3 },
+    }
+    for _, dc in ipairs(dotCoords) do
+        local d = self:Create("Frame", {
+            BackgroundColor3 = self.Theme.TextMuted,
+            BorderSizePixel = 0,
+            Position = UDim2.fromOffset(dc[1], dc[2]),
+            Size = UDim2.fromOffset(2, 2),
+            ZIndex = 13,
+            Parent = resizeGrip,
+        })
+        self:BindTheme(d, "BackgroundColor3", "TextMuted")
+        table.insert(gripDots, d)
+    end
+
+    local resizing = false
+    local resizeStartMouse = Vector2.zero
+    local resizeStartSize = Vector2.zero
+
+    self:Connect(resizeGrip.MouseEnter, function()
+        for _, d in ipairs(gripDots) do
+            Library:Tween(d, TweenFast, { BackgroundColor3 = self.Theme.Accent })
+        end
+    end)
+    self:Connect(resizeGrip.MouseLeave, function()
+        if not resizing then
+            for _, d in ipairs(gripDots) do
+                Library:Tween(d, TweenFast, { BackgroundColor3 = self.Theme.TextMuted })
+            end
+        end
+    end)
+    self:Connect(resizeGrip.InputBegan, function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            resizing = true
+            resizeStartMouse = Vector2.new(input.Position.X, input.Position.Y)
+            resizeStartSize = main.AbsoluteSize
+        end
+    end)
+    self:Connect(UserInputService.InputChanged, function(input)
+        if resizing and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local delta = Vector2.new(input.Position.X, input.Position.Y) - resizeStartMouse
+            local newW = math.clamp(resizeStartSize.X + delta.X, 580, 1100)
+            local newH = math.clamp(resizeStartSize.Y + delta.Y, 440, 850)
+            main.Size = UDim2.fromOffset(newW, newH)
+        end
+    end)
+    self:Connect(UserInputService.InputEnded, function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 and resizing then
+            resizing = false
+            for _, d in ipairs(gripDots) do
+                Library:Tween(d, TweenFast, { BackgroundColor3 = self.Theme.TextMuted })
+            end
+        end
+    end)
+
     local Window = {
         Main = main,
         Tabs = {},
         ActiveTab = nil,
+        TabChanged = Signal.new(),
     }
 
     function Window:SetOpen(state)
         Library.Open = state
         Library:ClosePopups()
         TooltipFrame.Visible = false
+        if Window.ESPPreview then
+            Window.ESPPreview:SyncVisibility()
+        end
         openToken += 1
         local token = openToken
         if state then
@@ -3553,6 +3895,10 @@ function Library:CreateWindow(cfg)
             Library:Tween(activeBar, TweenMedium, { Size = UDim2.new(0, 2, 1, -6) })
             Library:Tween(iconImg, TweenFast, { ImageColor3 = Library.Theme.Accent })
             Library:Tween(tabLbl, TweenFast, { TextColor3 = Library.Theme.Text })
+            Window.TabChanged:Fire(Tab)
+            if Window.ESPPreview then
+                Window.ESPPreview:SyncVisibility()
+            end
         end
 
         function Tab:AddLeftGroupbox(title, icon)
@@ -3600,6 +3946,366 @@ function Library:CreateWindow(cfg)
     end
 
     return Window
+end
+
+-- ============================================================================
+-- INTERACTIVE CS2 2D ESP PREVIEW PANEL (Synced with Players ESP Toggles/Colors)
+-- ============================================================================
+function Library:CreateESPPreview(window, targetTab)
+    if not window or not window.Main then return end
+    local main = window.Main
+    local targetTabName = type(targetTab) == "table" and targetTab.Name or tostring(targetTab or "Players ESP")
+    local previewEnabled = true
+
+    local panel = self:Create("Frame", {
+        Name = "ESPPreviewPanel",
+        BackgroundColor3 = self.Theme.Background,
+        Position = UDim2.fromOffset(0, 0),
+        Size = UDim2.fromOffset(205, 315),
+        Visible = false,
+        ZIndex = 20,
+        Parent = ScreenGui,
+    })
+    self:BindTheme(panel, "BackgroundColor3", "Background")
+    self:ApplyCSBorder(panel, "HighlightBorder")
+    self:CreateAccentBar(panel, 25)
+
+    local header = self:Create("Frame", {
+        BackgroundColor3 = self.Theme.Sidebar,
+        BorderSizePixel = 0,
+        Position = UDim2.fromOffset(0, 2),
+        Size = UDim2.new(1, 0, 0, 24),
+        ZIndex = 21,
+        Parent = panel,
+    })
+    self:BindTheme(header, "BackgroundColor3", "Sidebar")
+
+    local hSep = self:Create("Frame", {
+        BackgroundColor3 = self.Theme.InnerBorder,
+        BorderSizePixel = 0,
+        Position = UDim2.new(0, 0, 1, 0),
+        Size = UDim2.new(1, 0, 0, 1),
+        ZIndex = 22,
+        Parent = header,
+    })
+    self:BindTheme(hSep, "BackgroundColor3", "InnerBorder")
+
+    local hIcon = self:Create("ImageLabel", {
+        AnchorPoint = Vector2.new(0, 0.5),
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, 8, 0.5, 0),
+        Size = UDim2.fromOffset(12, 12),
+        Image = self:GetIcon("eye"),
+        ImageColor3 = self.Theme.Accent,
+        ZIndex = 22,
+        Parent = header,
+    })
+    self:BindTheme(hIcon, "ImageColor3", "Accent")
+
+    local hTitle = self:Create("TextLabel", {
+        BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(25, 0),
+        Size = UDim2.new(1, -30, 1, 0),
+        Font = Enum.Font.GothamBold,
+        Text = "ESP PREVIEW // CS2",
+        TextColor3 = self.Theme.Text,
+        TextSize = 11,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 22,
+        Parent = header,
+    })
+    self:BindTheme(hTitle, "TextColor3", "Text")
+
+    -- Interior Dark Viewport Box
+    local stage = self:Create("Frame", {
+        BackgroundColor3 = Color3.fromRGB(14, 14, 19),
+        Position = UDim2.fromOffset(10, 34),
+        Size = UDim2.new(1, -20, 1, -44),
+        ZIndex = 21,
+        Parent = panel,
+    })
+    self:ApplyCSBorder(stage, "InnerBorder")
+
+    -- Subtle Tactical Grid Lines inside Stage
+    for gx = 1, 3 do
+        self:Create("Frame", {
+            BackgroundColor3 = Color3.fromRGB(24, 24, 32),
+            BorderSizePixel = 0,
+            Position = UDim2.new(gx / 4, 0, 0, 0),
+            Size = UDim2.new(0, 1, 1, 0),
+            ZIndex = 21,
+            Parent = stage,
+        })
+    end
+    for gy = 1, 4 do
+        self:Create("Frame", {
+            BackgroundColor3 = Color3.fromRGB(24, 24, 32),
+            BorderSizePixel = 0,
+            Position = UDim2.new(0, 0, gy / 5, 0),
+            Size = UDim2.new(1, 0, 0, 1),
+            ZIndex = 21,
+            Parent = stage,
+        })
+    end
+
+    -- Enemy Glow Stencil Aura behind Dummy
+    local glowAura = self:Create("ImageLabel", {
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundTransparency = 1,
+        Position = UDim2.fromScale(0.5, 0.52),
+        Size = UDim2.fromOffset(145, 225),
+        Image = "rbxassetid://5028857084",
+        ImageColor3 = Color3.fromRGB(225, 55, 110),
+        ImageTransparency = 0.4,
+        ZIndex = 22,
+        Parent = stage,
+    })
+
+    -- 2D Dummy Character Silhouette Parts (Head, Torso, Left/Right Arms, Left/Right Legs)
+    local dummyRoot = self:Create("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundTransparency = 1,
+        Position = UDim2.fromScale(0.5, 0.52),
+        Size = UDim2.fromOffset(92, 182),
+        ZIndex = 24,
+        Parent = stage,
+    })
+
+    local bodyParts = {}
+    local function MakePart(px, py, pw, ph)
+        local p = self:Create("Frame", {
+            BackgroundColor3 = Color3.fromRGB(155, 195, 55),
+            BackgroundTransparency = 0.2,
+            BorderSizePixel = 0,
+            Position = UDim2.fromOffset(px, py),
+            Size = UDim2.fromOffset(pw, ph),
+            ZIndex = 24,
+            Parent = dummyRoot,
+        })
+        local st = self:Create("UIStroke", {
+            Color = Color3.fromRGB(10, 10, 14),
+            Thickness = 1,
+            Parent = p,
+        })
+        table.insert(bodyParts, { Frame = p, Stroke = st })
+        return p
+    end
+
+    -- Head, Neck, Torso, Arms, Legs
+    MakePart(33, 6, 26, 26)   -- Head
+    MakePart(24, 35, 44, 66)  -- Torso
+    MakePart(8, 36, 13, 60)   -- Left Arm
+    MakePart(71, 36, 13, 60)  -- Right Arm
+    MakePart(25, 104, 19, 72) -- Left Leg
+    MakePart(48, 104, 19, 72) -- Right Leg
+
+    -- 2D Bounding Box around Dummy
+    local espBox = self:Create("Frame", {
+        BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(0, 0),
+        Size = UDim2.fromScale(1, 1),
+        ZIndex = 27,
+        Parent = dummyRoot,
+    })
+    self:Create("UIStroke", {
+        Color = Color3.fromRGB(0, 0, 0),
+        Thickness = 3,
+        Transparency = 0.25,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+        Parent = espBox,
+    })
+    local espBoxStroke = self:Create("UIStroke", {
+        Color = Color3.fromRGB(155, 195, 55),
+        Thickness = 1,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+        Parent = espBox,
+    })
+
+    -- Top Player Name Label
+    local espName = self:Create("TextLabel", {
+        AnchorPoint = Vector2.new(0.5, 1),
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0.5, 0, 0, -4),
+        Size = UDim2.fromOffset(140, 14),
+        Font = Enum.Font.Code,
+        Text = "s1mple [92 HP]",
+        TextColor3 = Color3.fromRGB(235, 235, 240),
+        TextSize = 11,
+        ZIndex = 28,
+        Parent = dummyRoot,
+    })
+
+    -- Left Vertical Health Bar (CS:GO 2px bar with black outline)
+    local hpBarBg = self:Create("Frame", {
+        BackgroundColor3 = Color3.fromRGB(10, 10, 12),
+        BorderSizePixel = 0,
+        Position = UDim2.fromOffset(-7, 0),
+        Size = UDim2.new(0, 4, 1, 0),
+        ZIndex = 27,
+        Parent = dummyRoot,
+    })
+    local hpBarFill = self:Create("Frame", {
+        AnchorPoint = Vector2.new(0, 1),
+        BackgroundColor3 = Color3.fromRGB(115, 225, 85),
+        BorderSizePixel = 0,
+        Position = UDim2.fromScale(0, 1),
+        Size = UDim2.new(1, 0, 0.92, 0),
+        ZIndex = 28,
+        Parent = hpBarBg,
+    })
+    self:Create("UIStroke", {
+        Color = Color3.new(0, 0, 0),
+        Thickness = 1,
+        Parent = hpBarBg,
+    })
+
+    -- Bottom Weapon Text Label
+    local espWeapon = self:Create("TextLabel", {
+        AnchorPoint = Vector2.new(0.5, 0),
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0.5, 0, 1, 4),
+        Size = UDim2.fromOffset(140, 14),
+        Font = Enum.Font.Code,
+        Text = "SSG-08 SCOUT",
+        TextColor3 = Color3.fromRGB(170, 200, 255),
+        TextSize = 10,
+        ZIndex = 28,
+        Parent = dummyRoot,
+    })
+
+    -- Right Side ESP Flags Stack (HK, SCOPED, LC, etc.)
+    local flagsHolder = self:Create("Frame", {
+        BackgroundTransparency = 1,
+        Position = UDim2.new(1, 4, 0, 0),
+        Size = UDim2.fromOffset(48, 150),
+        ZIndex = 28,
+        Parent = dummyRoot,
+    })
+    self:Create("UIListLayout", {
+        Padding = UDim.new(0, 1),
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Parent = flagsHolder,
+    })
+
+    local flagOrder = {
+        { Key = "Armor (HK)",   Text = "HK",     Color = Color3.fromRGB(230, 230, 235) },
+        { Key = "Scoped",       Text = "ZOOM",   Color = Color3.fromRGB(85, 190, 255)  },
+        { Key = "Flashed",      Text = "FLASH",  Color = Color3.fromRGB(245, 205, 75)  },
+        { Key = "Exploit / LC", Text = "LC",     Color = Color3.fromRGB(235, 75, 75)   },
+        { Key = "Ping",         Text = "24MS",   Color = Color3.fromRGB(145, 220, 110) },
+        { Key = "Distance",     Text = "42FT",   Color = Color3.fromRGB(185, 185, 195) },
+    }
+    local flagLabels = {}
+    for idx, fInfo in ipairs(flagOrder) do
+        local fl = self:Create("TextLabel", {
+            BackgroundTransparency = 1,
+            LayoutOrder = idx,
+            Size = UDim2.new(1, 0, 0, 11),
+            Font = Enum.Font.GothamBold,
+            Text = fInfo.Text,
+            TextColor3 = fInfo.Color,
+            TextSize = 9,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            ZIndex = 29,
+            Parent = flagsHolder,
+        })
+        flagLabels[fInfo.Key] = fl
+    end
+
+    local function SyncPosition()
+        if not main or not main.Parent then return end
+        local absPos = main.AbsolutePosition
+        local absSize = main.AbsoluteSize
+        local insetY = self:GetGuiInsetY()
+        local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1920, 1080)
+        local px = absPos.X + absSize.X + 10
+        if px + 210 > vp.X then
+            px = math.max(6, absPos.X - 215)
+        end
+        local py = absPos.Y + insetY
+        panel.Position = UDim2.fromOffset(px, py)
+    end
+
+    local PreviewObj = { Frame = panel }
+
+    function PreviewObj:Refresh()
+        local showBox = Library.Flags["ESP_Box"]
+        if showBox == nil then showBox = true end
+        espBox.Visible = showBox
+        espBoxStroke.Color = Library.Flags["ESP_BoxColor"] or Library.Theme.Accent
+
+        local showName = Library.Flags["ESP_Name"]
+        if showName == nil then showName = true end
+        espName.Visible = showName
+        espName.TextColor3 = Library.Flags["ESP_NameColor"] or Color3.fromRGB(235, 235, 240)
+
+        local showHp = Library.Flags["ESP_Health"]
+        if showHp == nil then showHp = true end
+        hpBarBg.Visible = showHp
+
+        local showWeap = Library.Flags["ESP_Weapon"]
+        if showWeap == nil then showWeap = true end
+        espWeapon.Visible = showWeap
+        espWeapon.TextColor3 = Library.Flags["ESP_WeaponColor"] or Color3.fromRGB(170, 200, 255)
+
+        local showGlow = Library.Flags["ESP_Glow"]
+        if showGlow == nil then showGlow = true end
+        glowAura.Visible = showGlow
+        glowAura.ImageColor3 = Library.Flags["ESP_GlowColor"] or Color3.fromRGB(225, 55, 110)
+
+        local visChams = Library.Flags["Chams_Vis"]
+        if visChams == nil then visChams = true end
+        local xqzChams = Library.Flags["Chams_XQZ"]
+        local visCol = Library.Flags["Chams_VisCol"] or Library.Theme.Accent
+        local xqzCol = Library.Flags["Chams_XQZCol"] or Color3.fromRGB(60, 145, 245)
+        for _, bp in ipairs(bodyParts) do
+            if visChams then
+                bp.Frame.BackgroundColor3 = visCol
+                bp.Frame.BackgroundTransparency = 0.18
+            elseif xqzChams then
+                bp.Frame.BackgroundColor3 = xqzCol
+                bp.Frame.BackgroundTransparency = 0.35
+            else
+                bp.Frame.BackgroundColor3 = Color3.fromRGB(52, 54, 66)
+                bp.Frame.BackgroundTransparency = 0.25
+            end
+        end
+
+        local activeFlags = Library.Flags["ESP_Flags"]
+        for key, lbl in pairs(flagLabels) do
+            if type(activeFlags) == "table" then
+                lbl.Visible = (activeFlags[key] == true)
+            else
+                lbl.Visible = true
+            end
+        end
+    end
+
+    function PreviewObj:SyncVisibility()
+        local isOnTab = window.ActiveTab and (window.ActiveTab.Name == targetTabName)
+        panel.Visible = (Library.Open and previewEnabled and isOnTab) and true or false
+        if panel.Visible then
+            SyncPosition()
+            PreviewObj:Refresh()
+        end
+    end
+
+    function PreviewObj:SetEnabled(state)
+        previewEnabled = (state == true)
+        PreviewObj:SyncVisibility()
+    end
+
+    self:Connect(main:GetPropertyChangedSignal("AbsolutePosition"), function()
+        if panel.Visible then SyncPosition() end
+    end)
+    self:Connect(main:GetPropertyChangedSignal("AbsoluteSize"), function()
+        if panel.Visible then SyncPosition() end
+    end)
+
+    window.ESPPreview = PreviewObj
+    self.ESPPreview = PreviewObj
+    PreviewObj:SyncVisibility()
+    return PreviewObj
 end
 
 -- ============================================================================
