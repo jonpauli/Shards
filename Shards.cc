@@ -38,6 +38,8 @@ local Library = {
     CopiedColor = Color3.fromRGB(155, 195, 55),
     CopiedAlpha = 0,
     ActiveKeybinds = {},
+    KeybindOrder = {},
+    KeybindCounter = 0,
     Notifications = {},
     OpenPopups = {},
     Folder = "ShardsUI",
@@ -914,8 +916,8 @@ function Library:CreateKeybindList()
 
     local listHolder = self:Create("Frame", {
         BackgroundTransparency = 1,
-        Position = UDim2.fromOffset(6, 28),
-        Size = UDim2.new(1, -12, 0, 0),
+        Position = UDim2.fromOffset(8, 28),
+        Size = UDim2.new(1, -16, 1, -32),
         ZIndex = 282,
         Parent = kbFrame,
     })
@@ -925,62 +927,104 @@ function Library:CreateKeybindList()
         Parent = listHolder,
     })
 
-    local kbObj = { Frame = kbFrame }
+    local kbObj = { Frame = kbFrame, Rows = {} }
     function kbObj:Refresh()
-        for _, ch in ipairs(listHolder:GetChildren()) do
-            if ch:IsA("Frame") then ch:Destroy() end
-        end
+        local activeFlags = {}
         local count = 0
-        local maxW = 185
-        for _, item in pairs(Library.ActiveKeybinds) do
-            if item.Active and item.Key and item.Key ~= Enum.KeyCode.Unknown then
+        local maxW = 195
+
+        for idx, flag in ipairs(Library.KeybindOrder) do
+            local item = Library.ActiveKeybinds[flag]
+            if item and item.Active and item.Key and item.Key ~= Enum.KeyCode.Unknown then
+                activeFlags[flag] = true
                 count += 1
                 local modeStr = "[" .. string.lower(item.Mode or "toggle") .. "]"
+                local keyStr = "[" .. Library:FormatKey(item.Key) .. "]"
+                local rightStr = keyStr .. " " .. modeStr
                 local nameW = Library:GetTextBounds(item.Name, 12, Vector2.new(300, 20)).X
-                local modeW = Library:GetTextBounds(modeStr, 11, Vector2.new(150, 20)).X
-                maxW = math.max(maxW, nameW + modeW + 28)
-                local row = Library:Create("Frame", {
-                    BackgroundTransparency = 1,
-                    Size = UDim2.new(1, 0, 0, 16),
-                    ZIndex = 283,
-                    Parent = listHolder,
-                })
-                local nameLbl = Library:Create("TextLabel", {
-                    BackgroundTransparency = 1,
-                    Position = UDim2.fromOffset(-6, 0),
-                    Size = UDim2.new(0.68, 0, 1, 0),
-                    Font = Enum.Font.Code,
-                    Text = item.Name,
-                    TextColor3 = Library.Theme.Text,
-                    TextSize = 12,
-                    TextTransparency = 1,
-                    TextXAlignment = Enum.TextXAlignment.Left,
-                    ZIndex = 283,
-                    Parent = row,
-                })
-                local modeLbl = Library:Create("TextLabel", {
-                    BackgroundTransparency = 1,
-                    Position = UDim2.new(0.68, 6, 0, 0),
-                    Size = UDim2.new(0.32, 0, 1, 0),
-                    Font = Enum.Font.Code,
-                    Text = modeStr,
-                    TextColor3 = Library.Theme.Accent,
-                    TextSize = 11,
-                    TextTransparency = 1,
-                    TextXAlignment = Enum.TextXAlignment.Right,
-                    ZIndex = 283,
-                    Parent = row,
-                })
-                Library:Tween(nameLbl, TweenFast, {
-                    Position = UDim2.fromOffset(0, 0),
-                    TextTransparency = 0,
-                })
-                Library:Tween(modeLbl, TweenFast, {
-                    Position = UDim2.fromScale(0.68, 0),
-                    TextTransparency = 0,
-                })
+                local rightW = Library:GetTextBounds(rightStr, 11, Vector2.new(200, 20)).X
+                maxW = math.max(maxW, nameW + rightW + 34)
+
+                local entry = kbObj.Rows[flag]
+                if not entry or not entry.Row or not entry.Row.Parent then
+                    local row = Library:Create("Frame", {
+                        BackgroundTransparency = 1,
+                        LayoutOrder = item.Order or idx,
+                        Size = UDim2.new(1, 0, 0, 16),
+                        ZIndex = 283,
+                        Parent = listHolder,
+                    })
+                    local dot = Library:Create("Frame", {
+                        AnchorPoint = Vector2.new(0, 0.5),
+                        BackgroundColor3 = Library.Theme.Accent,
+                        BorderSizePixel = 0,
+                        Position = UDim2.new(0, 0, 0.5, 0),
+                        Size = UDim2.fromOffset(3, 3),
+                        ZIndex = 284,
+                        Parent = row,
+                    })
+                    Library:BindTheme(dot, "BackgroundColor3", "Accent")
+                    local nameLbl = Library:Create("TextLabel", {
+                        BackgroundTransparency = 1,
+                        Position = UDim2.fromOffset(2, 0),
+                        Size = UDim2.new(0.62, -8, 1, 0),
+                        Font = Enum.Font.Code,
+                        Text = item.Name,
+                        TextColor3 = Library.Theme.Text,
+                        TextSize = 12,
+                        TextTransparency = 1,
+                        TextXAlignment = Enum.TextXAlignment.Left,
+                        TextYAlignment = Enum.TextYAlignment.Center,
+                        ZIndex = 283,
+                        Parent = row,
+                    })
+                    Library:BindTheme(nameLbl, "TextColor3", "Text")
+                    local modeLbl = Library:Create("TextLabel", {
+                        BackgroundTransparency = 1,
+                        Position = UDim2.new(0.62, 6, 0, 0),
+                        Size = UDim2.new(0.38, 0, 1, 0),
+                        Font = Enum.Font.Code,
+                        Text = rightStr,
+                        TextColor3 = Library.Theme.Accent,
+                        TextSize = 11,
+                        TextTransparency = 1,
+                        TextXAlignment = Enum.TextXAlignment.Right,
+                        TextYAlignment = Enum.TextYAlignment.Center,
+                        ZIndex = 283,
+                        Parent = row,
+                    })
+                    Library:BindTheme(modeLbl, "TextColor3", "Accent")
+                    Library:Tween(nameLbl, TweenFast, {
+                        Position = UDim2.fromOffset(8, 0),
+                        TextTransparency = 0,
+                    })
+                    Library:Tween(modeLbl, TweenFast, {
+                        Position = UDim2.fromScale(0.62, 0),
+                        TextTransparency = 0,
+                    })
+                    kbObj.Rows[flag] = {
+                        Row = row,
+                        NameLbl = nameLbl,
+                        ModeLbl = modeLbl,
+                    }
+                else
+                    entry.Row.LayoutOrder = item.Order or idx
+                    entry.NameLbl.Text = item.Name
+                    entry.ModeLbl.Text = rightStr
+                end
             end
         end
+
+        for flag, entry in pairs(kbObj.Rows) do
+            if not activeFlags[flag] then
+                if entry.Row and entry.Row.Parent then
+                    entry.Row:Destroy()
+                end
+                kbObj.Rows[flag] = nil
+            end
+        end
+
+        listHolder.Size = UDim2.new(1, -16, 0, count * 19)
         local targetH = 30 + (count > 0 and (count * 19 + 4) or 0)
         Library:Tween(kbFrame, TweenFast, { Size = UDim2.fromOffset(maxW, targetH) })
     end
@@ -998,15 +1042,27 @@ end
 -- ============================================================================
 function Library:CreateKeybindAttachment(parentRow, cfg, toggleLink)
     cfg = cfg or {}
-    local flag = cfg.Flag or (cfg.Name and ("KB_" .. cfg.Name)) or ("KB_" .. tostring(math.random(1000, 9999)))
+    self.KeybindCounter += 1
+    local kbOrder = self.KeybindCounter
+    local rawFlag = cfg.Flag
+        or (toggleLink and toggleLink.Name and ("KB_" .. toggleLink.Name .. "_" .. tostring(kbOrder)))
+        or (cfg.Name and ("KB_" .. cfg.Name .. "_" .. tostring(kbOrder)))
+        or ("KB_" .. tostring(kbOrder))
+    local flag = rawFlag
+    if self.ActiveKeybinds[flag] ~= nil then
+        flag = rawFlag .. "_" .. tostring(kbOrder)
+    end
+    if not table.find(self.KeybindOrder, flag) then
+        table.insert(self.KeybindOrder, flag)
+    end
     local mode = cfg.Mode or "Toggle" -- "Always", "Hold", "Toggle"
     local currentKey = cfg.Default or Enum.KeyCode.Unknown
     local binding = false
-    local active = (mode == "Always")
+    local active = (mode == "Always") or (toggleLink ~= nil and toggleLink.Value == true and mode == "Toggle")
 
     local Keybind = {
         Type = "Keybind",
-        Name = cfg.Name or (toggleLink and toggleLink.Name) or "Keybind",
+        Name = cfg.Name or (toggleLink and toggleLink.Name) or ("Keybind " .. tostring(kbOrder)),
         Value = currentKey,
         Mode = mode,
         Active = active,
@@ -1144,12 +1200,35 @@ function Library:CreateKeybindAttachment(parentRow, cfg, toggleLink)
     end
 
     local function SyncKeybindList()
+        local isShown = false
+        if currentKey and currentKey ~= Enum.KeyCode.Unknown then
+            if mode == "Always" then
+                isShown = (toggleLink == nil) or (toggleLink.Value == true)
+            elseif toggleLink then
+                isShown = (toggleLink.Value == true)
+            else
+                isShown = (Keybind.Active == true)
+            end
+        end
         self.ActiveKeybinds[flag] = {
             Name = Keybind.Name,
             Key = currentKey,
             Mode = mode,
-            Active = Keybind.Active and (not toggleLink or toggleLink.Value),
+            Order = kbOrder,
+            Active = isShown,
         }
+        if parentRow and parentRow.Name == "AttachTray" then
+            local totalW = 0
+            local visibleCount = 0
+            for _, ch in ipairs(parentRow:GetChildren()) do
+                if ch:IsA("GuiObject") and ch.Visible then
+                    visibleCount += 1
+                    totalW += ch.Size.X.Offset
+                end
+            end
+            totalW += math.max(0, visibleCount - 1) * 5
+            parentRow.Size = UDim2.fromOffset(math.max(85, totalW + 4), 16)
+        end
         if self.KeybindList then
             self.KeybindList:Refresh()
         end
@@ -1278,7 +1357,10 @@ function Library:CreateKeybindAttachment(parentRow, cfg, toggleLink)
     end)
 
     if toggleLink then
-        toggleLink.Changed:Connect(function()
+        toggleLink.Changed:Connect(function(newState)
+            if mode == "Toggle" then
+                Keybind.Active = (newState == true)
+            end
             SyncKeybindList()
         end)
     end
@@ -1765,7 +1847,7 @@ function GroupboxMethods:AddToggle(cfg)
     local boxGlow = Library:Create("ImageLabel", {
         AnchorPoint = Vector2.new(0.5, 0.5),
         BackgroundTransparency = 1,
-        Position = UDim2.fromOffset(7, 10),
+        Position = UDim2.new(0, 8, 0.5, 0),
         Size = UDim2.fromOffset(24, 24),
         Image = "rbxassetid://5028857084",
         ImageColor3 = risky and Library.Theme.Risky or Library.Theme.Accent,
@@ -1774,12 +1856,12 @@ function GroupboxMethods:AddToggle(cfg)
         Parent = row,
     })
 
-    -- The 13x13 CS:GO Square Box
+    -- The 14x14 CS:GO Square Box (even pixel size so 0.5 AnchorPoint centers without 0.5px subpixel rounding)
     local boxBase = Library:Create("Frame", {
-        AnchorPoint = Vector2.new(0, 0.5),
+        AnchorPoint = Vector2.new(0.5, 0.5),
         BackgroundColor3 = Library.Theme.Element,
-        Position = UDim2.new(0, 1, 0.5, 0),
-        Size = UDim2.fromOffset(13, 13),
+        Position = UDim2.new(0, 8, 0.5, 0),
+        Size = UDim2.fromOffset(14, 14),
         ZIndex = 10,
         Parent = row,
     })
@@ -1812,7 +1894,7 @@ function GroupboxMethods:AddToggle(cfg)
         AnchorPoint = Vector2.new(0.5, 0.5),
         BackgroundTransparency = 1,
         Position = UDim2.fromScale(0.5, 0.5),
-        Size = UDim2.fromOffset(9, 9),
+        Size = UDim2.fromOffset(10, 10),
         Image = Library:GetIcon("check"),
         ImageColor3 = Color3.fromRGB(10, 10, 12),
         ImageTransparency = (state and cfg.Checkmark) and 0.15 or 1,
@@ -1823,13 +1905,14 @@ function GroupboxMethods:AddToggle(cfg)
     -- Label next to square
     local label = Library:Create("TextLabel", {
         BackgroundTransparency = 1,
-        Position = UDim2.fromOffset(21, 0),
+        Position = UDim2.fromOffset(22, 0),
         Size = UDim2.new(1, -75, 1, 0),
         Font = Enum.Font.Code,
         Text = name,
         TextColor3 = state and Library.Theme.Text or (risky and Library.Theme.Risky or Library.Theme.TextDim),
         TextSize = 12,
         TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Center,
         ZIndex = 10,
         Parent = row,
     })
@@ -1837,6 +1920,7 @@ function GroupboxMethods:AddToggle(cfg)
 
     -- Right-side attachment tray (for Keybinds & ColorPickers)
     local attachTray = Library:Create("Frame", {
+        Name = "AttachTray",
         BackgroundTransparency = 1,
         AnchorPoint = Vector2.new(1, 0.5),
         Position = UDim2.new(1, 0, 0.5, 0),
@@ -3241,6 +3325,7 @@ function GroupboxMethods:AddLabel(textOrCfg, wrapText)
     Library:BindTheme(lbl, "TextColor3", "TextDim")
 
     local attachTray = Library:Create("Frame", {
+        Name = "AttachTray",
         BackgroundTransparency = 1,
         AnchorPoint = Vector2.new(1, 0.5),
         Position = UDim2.new(1, 0, 0.5, 0),
