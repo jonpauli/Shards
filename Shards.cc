@@ -2868,7 +2868,74 @@ function Library:CreateWorldController()
     local aaApplied = false
     local jitterFlip = false
     local lastTrigFire = 0
+    local trigAcquireTime = nil
     local lastRageFire = 0
+    local vimService = nil
+    pcall(function() vimService = game:GetService("VirtualInputManager") end)
+
+    local function FireWeapon(myChar, mPos)
+        if self.Open then return end
+        local eqTool = myChar and myChar:FindFirstChildOfClass("Tool")
+        if eqTool then
+            pcall(function() eqTool:Activate() end)
+        end
+        local usedPress = false
+        pcall(function()
+            if mouse1press and mouse1release then
+                usedPress = true
+                mouse1press()
+                task.delay(0.018, function()
+                    pcall(mouse1release)
+                end)
+            elseif mouse1click then
+                usedPress = true
+                mouse1click()
+            end
+        end)
+        if not usedPress and vimService then
+            pcall(function()
+                vimService:SendMouseButtonEvent(mPos.X, mPos.Y, 0, true, game, 1)
+                task.delay(0.018, function()
+                    pcall(function()
+                        vimService:SendMouseButtonEvent(mPos.X, mPos.Y, 0, false, game, 1)
+                    end)
+                end)
+            end)
+        end
+    end
+
+    local function RaycastPierceClips(origin, dir, baseIgnore)
+        local params = RaycastParams.new()
+        params.FilterType = Enum.RaycastFilterType.Exclude
+        params.IgnoreWater = true
+        local ignore = table.clone(baseIgnore)
+        params.FilterDescendantsInstances = ignore
+        for _ = 1, 5 do
+            local hit = workspace:Raycast(origin, dir, params)
+            if not hit or not hit.Instance then
+                return nil
+            end
+            local inst = hit.Instance
+            local isPlayerPart = false
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if plr ~= LocalPlayer and plr.Character and inst:IsDescendantOf(plr.Character) then
+                    isPlayerPart = true
+                    break
+                end
+            end
+            if isPlayerPart then
+                return hit
+            end
+            -- Pierce through invisible Counter Blox clip/trigger parts or non-cancollide barriers
+            if inst.Transparency >= 0.9 or not inst.CanCollide or string.find(string.lower(inst.Name), "clip") then
+                table.insert(ignore, inst)
+                params.FilterDescendantsInstances = ignore
+            else
+                return hit
+            end
+        end
+        return nil
+    end
     local noclipParts = {}
     local tpTransParts = {}
     local disabledPostEffects = {}
@@ -4105,13 +4172,18 @@ function Library:CreateWorldController()
                 local allowWall = rageActive and (F["Rage_Autowall"] == true)
                 local hbMap = type(F["Rage_Hitboxes"]) == "table" and F["Rage_Hitboxes"] or nil
 
-                local rayParams = RaycastParams.new()
-                rayParams.FilterType = Enum.RaycastFilterType.Exclude
-                local ignoreList = { cam }
-                if myChar then table.insert(ignoreList, myChar) end
+                local baseIgnore = { cam, beamFolder }
+                if myChar then table.insert(baseIgnore, myChar) end
                 local rayIgnore = workspace:FindFirstChild("Ray_Ignore")
-                if rayIgnore then table.insert(ignoreList, rayIgnore) end
-                rayParams.FilterDescendantsInstances = ignoreList
+                if rayIgnore then table.insert(baseIgnore, rayIgnore) end
+                local debrisFolder = workspace:FindFirstChild("Debris")
+                if debrisFolder then table.insert(baseIgnore, debrisFolder) end
+                local clipsFolder = workspace:FindFirstChild("Clips")
+                if clipsFolder then table.insert(baseIgnore, clipsFolder) end
+                local mapFolder = workspace:FindFirstChild("Map")
+                if mapFolder and mapFolder:FindFirstChild("Clips") then
+                    table.insert(baseIgnore, mapFolder.Clips)
+                end
 
                 local function ResolveTargetPart(char, tel)
                     if forceBaim then
@@ -4152,7 +4224,7 @@ function Library:CreateWorldController()
                                         local visible = allowWall
                                         if not visible then
                                             local dir = part.Position - cam.CFrame.Position
-                                            local hit = workspace:Raycast(cam.CFrame.Position, dir, rayParams)
+                                            local hit = RaycastPierceClips(cam.CFrame.Position, dir, baseIgnore)
                                             visible = (not hit) or hit.Instance:IsDescendantOf(tel.Character)
                                         end
                                         if visible then
@@ -4191,14 +4263,10 @@ function Library:CreateWorldController()
                             myHrp.AssemblyLinearVelocity = Vector3.new(v.X * 0.12, v.Y, v.Z * 0.12)
                         end
                         cam.CFrame = (F["Rage_Silent"] == true) and targetCF or cam.CFrame:Lerp(targetCF, 0.92)
-                        local fireCooldown = (F["Rage_DT"] == true) and 0.08 or 0.18
+                        local fireCooldown = (F["Rage_DT"] == true) and 0.06 or 0.14
                         if F["Rage_AutoFire"] and (os.clock() - lastRageFire) >= fireCooldown then
                             lastRageFire = os.clock()
-                            local eqTool = myChar and myChar:FindFirstChildOfClass("Tool")
-                            if eqTool then pcall(function() eqTool:Activate() end) end
-                            pcall(function()
-                                if mouse1click and not self.Open then mouse1click() end
-                            end)
+                            FireWeapon(myChar, mPos)
                             SpawnTracer(bestPlr and bestPlr.Name or aimPos)
                         end
                     else
@@ -4209,31 +4277,74 @@ function Library:CreateWorldController()
                 end
             end
 
-            if trigActive and (os.clock() - lastTrigFire) >= ((tonumber(F["Trig_Delay"]) or 35) / 1000) then
-                local rayParams = RaycastParams.new()
-                rayParams.FilterType = Enum.RaycastFilterType.Exclude
-                local ignoreList = { cam }
-                if myChar then table.insert(ignoreList, myChar) end
+            if trigActive then
+                local baseIgnore = { cam, beamFolder }
+                if myChar then table.insert(baseIgnore, myChar) end
                 local rayIgnore = workspace:FindFirstChild("Ray_Ignore")
-                if rayIgnore then table.insert(ignoreList, rayIgnore) end
-                rayParams.FilterDescendantsInstances = ignoreList
-                local hit = workspace:Raycast(cam.CFrame.Position, cam.CFrame.LookVector * 600, rayParams)
+                if rayIgnore then table.insert(baseIgnore, rayIgnore) end
+                local debrisFolder = workspace:FindFirstChild("Debris")
+                if debrisFolder then table.insert(baseIgnore, debrisFolder) end
+                local clipsFolder = workspace:FindFirstChild("Clips")
+                if clipsFolder then table.insert(baseIgnore, clipsFolder) end
+                local mapFolder = workspace:FindFirstChild("Map")
+                if mapFolder and mapFolder:FindFirstChild("Clips") then
+                    table.insert(baseIgnore, mapFolder.Clips)
+                end
+
+                local unitRay = cam:ViewportPointToRay(mPos.X, mPos.Y)
+                local hit = RaycastPierceClips(unitRay.Origin, unitRay.Direction * 1000, baseIgnore)
+                    or RaycastPierceClips(cam.CFrame.Position, cam.CFrame.LookVector * 1000, baseIgnore)
+                local hitEnemyPlr = nil
+
                 if hit and hit.Instance then
                     for _, plr in ipairs(Players:GetPlayers()) do
                         if plr ~= LocalPlayer and plr.Character and hit.Instance:IsDescendantOf(plr.Character) then
+                            local isWhitelisted = (F["Misc_Whitelist"] == true) and (F["Misc_PlayerTarget"] == plr.Name)
                             local tel = self:GetPlayerTelemetry(plr)
-                            if tel and tel.Alive and (not F["ESP_TeamCheck"] or not tel.IsTeammate) then
-                                lastTrigFire = os.clock()
-                                local eqTool = myChar and myChar:FindFirstChildOfClass("Tool")
-                                if eqTool then pcall(function() eqTool:Activate() end) end
-                                pcall(function()
-                                    if mouse1click and not self.Open then mouse1click() end
-                                end)
+                            if not isWhitelisted and tel and tel.Alive and (not F["ESP_TeamCheck"] or not tel.IsTeammate) then
+                                hitEnemyPlr = plr
                                 break
                             end
                         end
                     end
                 end
+
+                -- Fallback: check Mouse.Target in case a custom hitbox wrapper was hit
+                if not hitEnemyPlr and LocalPlayer then
+                    pcall(function()
+                        local mTarget = LocalPlayer:GetMouse().Target
+                        if mTarget then
+                            for _, plr in ipairs(Players:GetPlayers()) do
+                                if plr ~= LocalPlayer and plr.Character and mTarget:IsDescendantOf(plr.Character) then
+                                    local isWhitelisted = (F["Misc_Whitelist"] == true) and (F["Misc_PlayerTarget"] == plr.Name)
+                                    local tel = self:GetPlayerTelemetry(plr)
+                                    if not isWhitelisted and tel and tel.Alive and (not F["ESP_TeamCheck"] or not tel.IsTeammate) then
+                                        hitEnemyPlr = plr
+                                        break
+                                    end
+                                end
+                            end
+                        end
+                    end)
+                end
+
+                if hitEnemyPlr then
+                    local now = os.clock()
+                    if not trigAcquireTime then
+                        trigAcquireTime = now
+                    end
+                    local delaySec = math.max(0, (tonumber(F["Trig_Delay"]) or 0) / 1000)
+                    local fireInterval = (F["Rage_DT"] == true) and 0.05 or 0.08
+                    if (now - trigAcquireTime) >= delaySec and (now - lastTrigFire) >= fireInterval then
+                        lastTrigFire = now
+                        FireWeapon(myChar, mPos)
+                        SpawnTracer(hitEnemyPlr.Name)
+                    end
+                else
+                    trigAcquireTime = nil
+                end
+            else
+                trigAcquireTime = nil
             end
 
             -- 3) Thirdperson Camera Offset (works in both Classic and Counter Blox LockFirstPerson/Scriptable cameras)
