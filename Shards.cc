@@ -2888,6 +2888,7 @@ function Library:CreateWorldController()
     pcall(function() vimService = game:GetService("VirtualInputManager") end)
 
     -- Hook workspace raycasts, Camera rays & Mouse.Hit/Target for true camera-free Silent Aim in Counter Blox
+    local rawFindFirstChild = game.FindFirstChild
     pcall(function()
         if hookmetamethod and getnamecallmethod then
             local wrapClosure = newcclosure or function(fn) return fn end
@@ -2931,7 +2932,7 @@ function Library:CreateWorldController()
                                             local newLen = math.max(len, vec.Magnitude + 50, 2048)
                                             args[1] = Ray.new(origin, vec.Unit * newLen)
                                             if method == "FindPartOnRayWithIgnoreList" and F["Rage_Autowall"] == true and type(args[2]) == "table" then
-                                                local mapFolder = workspace:FindFirstChild("Map")
+                                                local mapFolder = rawFindFirstChild(workspace, "Map")
                                                 if mapFolder and not table.find(args[2], mapFolder) then
                                                     local newIgnore = table.clone(args[2])
                                                     table.insert(newIgnore, mapFolder)
@@ -3785,7 +3786,7 @@ function Library:CreateWorldController()
         local mPos = UserInputService:GetMouseLocation()
 
         -- 1) FOV Circle & Deadzone Circle
-        local showFov = (F["ESP_ShowFOV"] == true) or (F["Rage_Enabled"] == true) or (F["Legit_Enable"] == true)
+        local showFov = (F["ESP_ShowFOV"] == true) or (F["Rage_Enabled"] == true) or (F["Rage_Silent"] == true) or (F["Legit_Enable"] == true)
         fovCircle.Visible = showFov
         if showFov then
             local radius = F["Legit_Enable"] and ((tonumber(F["Legit_FOV"]) or 4.5) * 12) or ((tonumber(F["Rage_FOV"]) or 90) * 1.6)
