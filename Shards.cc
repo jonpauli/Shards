@@ -2894,80 +2894,108 @@ function Library:CreateWorldController()
             local oldNamecall
             oldNamecall = hookmetamethod(game, "__namecall", wrapClosure(function(selfObj, ...)
                 if not isInternalRaycast and not Library.Unloaded then
+                    local extSilent = (getgenv and getgenv().__ShardsSilentState) or _G.__ShardsSilentState
+                    local S = (getgenv and getgenv().__ShardsAimState) or _G.__ShardsAimState
+                    if (S and S.InternalRay) or (extSilent and not extSilent.Unloaded) then
+                        return oldNamecall(selfObj, ...)
+                    end
                     local F = Library.Flags
-                    local targetPos = (F["Rage_Enabled"] == true and F["Rage_Silent"] == true)
-                        and (currentSilentPos or (currentSilentPart and currentSilentPart.Parent and currentSilentPart.Position))
+                    local targetPos = ((F["Rage_Enabled"] == true or F["Rage_Silent"] == true) and F["Rage_Silent"] == true)
+                        and (currentSilentPos or (currentSilentPart and currentSilentPart.Parent and currentSilentPart.Position) or (S and S.TargetPos))
                         or nil
-                    local targetPlr = targetPos and currentSilentPlr or nil
+                    local targetPlr = targetPos and (currentSilentPlr or (S and S.TargetPlr)) or nil
                     local wc = Library.WorldController
                     local hasCustomResolver = (not targetPos and wc and wc.ResolveBulletTarget ~= nil)
                     if targetPos or hasCustomResolver then
                         local method = getnamecallmethod()
-                        if selfObj == workspace then
-                            if method == "FindPartOnRayWithIgnoreList"
-                                or method == "FindPartOnRayWithWhitelist"
-                                or method == "FindPartOnRay"
-                            then
-                                local args = { ... }
-                                if typeof(args[1]) == "Ray" then
-                                    local origRay = args[1]
-                                    local len = origRay.Direction.Magnitude
-                                    -- Zero OP_NAMECALL calls inside hook so L->namecall is never overwritten before oldNamecall
-                                    if len >= 35 and origRay.Direction.Unit.Y > -0.95 and (not cachedCamPos or (origRay.Origin - cachedCamPos).Magnitude < 42) then
-                                        local origin = origRay.Origin
-                                        local resolvedPos, resolvedPlr = targetPos, targetPlr
-                                        if not resolvedPos and hasCustomResolver then
-                                            resolvedPos, resolvedPlr = wc.ResolveBulletTarget(origin, origRay.Direction)
-                                        end
-                                        if resolvedPos then
-                                            local vec = resolvedPos - origin
-                                            if vec.Magnitude > 0.05 then
-                                                local newLen = math.max(len, vec.Magnitude + 50, 999)
-                                                args[1] = Ray.new(origin, vec.Unit * newLen)
-                                                lastLocalShotTime = os.clock()
-                                                if resolvedPlr then
-                                                    lastLocalShotTarget = resolvedPlr
-                                                end
-                                                return oldNamecall(selfObj, unpack(args))
-                                            end
-                                        end
+                        local camPos = cachedCamPos or (workspace.CurrentCamera and workspace.CurrentCamera.CFrame.Position)
+                        if method == "FindPartOnRayWithIgnoreList"
+                            or method == "FindPartOnRayWithWhitelist"
+                            or method == "FindPartOnRay"
+                        then
+                            local args = { ... }
+                            local nArgs = select("#", ...)
+                            local a1 = args[1]
+                            if typeof(a1) == "Ray" then
+                                local origDir = a1.Direction
+                                local len = origDir.Magnitude
+                                local origin = a1.Origin
+                                if len >= 8 and origDir.Unit.Y > -0.85 and camPos and (origin - camPos).Magnitude < 28 then
+                                    local resolvedPos, resolvedPlr = targetPos, targetPlr
+                                    if not resolvedPos and hasCustomResolver then
+                                        resolvedPos, resolvedPlr = wc.ResolveBulletTarget(origin, origDir)
                                     end
-                                end
-                            elseif method == "Raycast" then
-                                local args = { ... }
-                                if typeof(args[1]) == "Vector3" and typeof(args[2]) == "Vector3" then
-                                    local len = args[2].Magnitude
-                                    if len >= 35 and args[2].Unit.Y > -0.95 and (not cachedCamPos or (args[1] - cachedCamPos).Magnitude < 42) then
-                                        local origin = args[1]
-                                        local resolvedPos, resolvedPlr = targetPos, targetPlr
-                                        if not resolvedPos and hasCustomResolver then
-                                            resolvedPos, resolvedPlr = wc.ResolveBulletTarget(origin, args[2])
-                                        end
-                                        if resolvedPos then
-                                            local vec = resolvedPos - origin
-                                            if vec.Magnitude > 0.05 then
-                                                local newLen = math.max(len, vec.Magnitude + 50, 999)
-                                                args[2] = vec.Unit * newLen
-                                                lastLocalShotTime = os.clock()
-                                                if resolvedPlr then
-                                                    lastLocalShotTarget = resolvedPlr
+                                    if resolvedPos then
+                                        local vec = resolvedPos - origin
+                                        if vec.Magnitude > 0.05 then
+                                            local newLen = math.max(len, vec.Magnitude + 50, 2048)
+                                            args[1] = Ray.new(origin, vec.Unit * newLen)
+                                            if method == "FindPartOnRayWithIgnoreList" and F["Rage_Autowall"] == true and type(args[2]) == "table" then
+                                                local mapFolder = workspace:FindFirstChild("Map")
+                                                if mapFolder and not table.find(args[2], mapFolder) then
+                                                    local newIgnore = table.clone(args[2])
+                                                    table.insert(newIgnore, mapFolder)
+                                                    args[2] = newIgnore
                                                 end
-                                                return oldNamecall(selfObj, unpack(args))
                                             end
+                                            lastLocalShotTime = os.clock()
+                                            if resolvedPlr then
+                                                lastLocalShotTarget = resolvedPlr
+                                            end
+                                            return oldNamecall(selfObj, table.unpack(args, 1, nArgs))
                                         end
                                     end
                                 end
                             end
-                        elseif selfObj == workspace.CurrentCamera and (method == "ViewportPointToRay" or method == "ScreenPointToRay") then
-                            local camPos = selfObj.CFrame.Position
-                            local resolvedPos = targetPos
-                            if not resolvedPos and hasCustomResolver then
-                                resolvedPos = wc.ResolveBulletTarget(camPos, selfObj.CFrame.LookVector * 500)
+                        elseif method == "Raycast" then
+                            local args = { ... }
+                            local nArgs = select("#", ...)
+                            local a1, a2 = args[1], args[2]
+                            if typeof(a1) == "Vector3" and typeof(a2) == "Vector3" then
+                                local len = a2.Magnitude
+                                local origin = a1
+                                if len >= 8 and a2.Unit.Y > -0.85 and camPos and (origin - camPos).Magnitude < 28 then
+                                    local resolvedPos, resolvedPlr = targetPos, targetPlr
+                                    if not resolvedPos and hasCustomResolver then
+                                        resolvedPos, resolvedPlr = wc.ResolveBulletTarget(origin, a2)
+                                    end
+                                    if resolvedPos then
+                                        local vec = resolvedPos - origin
+                                        if vec.Magnitude > 0.05 then
+                                            local newLen = math.max(len, vec.Magnitude + 50, 1000)
+                                            args[2] = vec.Unit * newLen
+                                            lastLocalShotTime = os.clock()
+                                            if resolvedPlr then
+                                                lastLocalShotTarget = resolvedPlr
+                                            end
+                                            return oldNamecall(selfObj, table.unpack(args, 1, nArgs))
+                                        end
+                                    end
+                                end
                             end
-                            if resolvedPos then
-                                local vec = resolvedPos - camPos
-                                if vec.Magnitude > 0.05 then
-                                    return Ray.new(camPos, vec.Unit)
+                        elseif method == "FireServer" and typeof(selfObj) == "Instance" and selfObj.Name == "HitPart" then
+                            local activePart = currentSilentPart or (S and S.TargetPart)
+                            local resolvedPos = targetPos or (activePart and activePart.Parent and activePart.Position)
+                            if activePart and activePart.Parent and resolvedPos then
+                                local args = { ... }
+                                local nArgs = select("#", ...)
+                                if typeof(args[1]) == "Instance" and typeof(args[2]) == "Vector3" then
+                                    args[1] = activePart
+                                    args[2] = resolvedPos
+                                    return oldNamecall(selfObj, table.unpack(args, 1, nArgs))
+                                end
+                            end
+                        elseif method == "ViewportPointToRay" or method == "ScreenPointToRay" then
+                            if camPos then
+                                local resolvedPos = targetPos
+                                if not resolvedPos and hasCustomResolver and workspace.CurrentCamera then
+                                    resolvedPos = wc.ResolveBulletTarget(camPos, workspace.CurrentCamera.CFrame.LookVector * 500)
+                                end
+                                if resolvedPos then
+                                    local vec = resolvedPos - camPos
+                                    if vec.Magnitude > 0.05 then
+                                        return Ray.new(camPos, vec.Unit)
+                                    end
                                 end
                             end
                         end
@@ -2979,8 +3007,12 @@ function Library:CreateWorldController()
             local oldIndex
             oldIndex = hookmetamethod(game, "__index", wrapClosure(function(selfObj, key)
                 if not isInternalRaycast and not Library.Unloaded and localMouse and selfObj == localMouse then
+                    local extSilent = (getgenv and getgenv().__ShardsSilentState) or _G.__ShardsSilentState
+                    if extSilent and not extSilent.Unloaded then
+                        return oldIndex(selfObj, key)
+                    end
                     local F = Library.Flags
-                    local activePart = (F["Rage_Enabled"] == true and F["Rage_Silent"] == true) and currentSilentPart or nil
+                    local activePart = ((F["Rage_Enabled"] == true or F["Rage_Silent"] == true) and F["Rage_Silent"] == true) and currentSilentPart or nil
                     local targetPos = activePart and (currentSilentPos or activePart.Position) or nil
                     local wc = Library.WorldController
                     if not targetPos and wc and wc.ResolveBulletTarget then
@@ -2988,11 +3020,11 @@ function Library:CreateWorldController()
                         activePart = currentRagePart or activePart
                     end
                     if targetPos and activePart and activePart.Parent then
-                        if key == "Hit" then
+                        if key == "Hit" or key == "hit" then
                             return CFrame.new(targetPos)
-                        elseif key == "Target" then
+                        elseif key == "Target" or key == "target" then
                             return activePart
-                        elseif key == "UnitRay" then
+                        elseif key == "UnitRay" or key == "unitRay" then
                             local cam = workspace.CurrentCamera
                             local orig = cam and cam.CFrame.Position or Vector3.zero
                             local vec = targetPos - orig
@@ -3011,17 +3043,17 @@ function Library:CreateWorldController()
 
     local function GetMuzzleOrigin(cam)
         local myChar = LocalPlayer and LocalPlayer.Character
+        local camPos = cam and cam.CFrame.Position
         -- 1) Counter Blox first-person viewmodel (workspace.CurrentCamera.Arms)
-        if not self.Flags["World_TP"] and cam then
+        if not self.Flags["World_TP"] and cam and camPos then
             local arms = cam:FindFirstChild("Arms") or cam:FindFirstChild("Viewmodel") or cam:FindFirstChild("ViewModel")
             if arms then
                 for _, name in ipairs({ "Flash", "Muzzle", "SmokePart", "Barrel", "Tip", "MuzzleAttachment" }) do
                     local part = arms:FindFirstChild(name, true)
                     if part then
-                        if part:IsA("Attachment") then
-                            return part.WorldPosition
-                        elseif part:IsA("BasePart") then
-                            return part.Position
+                        local pos = part:IsA("Attachment") and part.WorldPosition or (part:IsA("BasePart") and part.Position or nil)
+                        if pos and (pos - camPos).Magnitude < 6.5 then
+                            return pos
                         end
                     end
                 end
@@ -3032,13 +3064,15 @@ function Library:CreateWorldController()
 
         -- 2) Third-person / world character right hand or gun barrel
         if myChar then
+            local hrp = myChar:FindFirstChild("HumanoidRootPart") or myChar:FindFirstChild("Torso") or myChar.PrimaryPart
             for _, name in ipairs({ "Flash", "Muzzle", "Barrel", "RightHand", "Right Arm" }) do
                 local part = myChar:FindFirstChild(name, true)
                 if part and part:IsA("BasePart") then
-                    return part.Position + (cam and cam.CFrame.LookVector * 1.1 or Vector3.zero)
+                    if not hrp or (part.Position - hrp.Position).Magnitude < 10 then
+                        return part.Position + (cam and cam.CFrame.LookVector * 1.1 or Vector3.zero)
+                    end
                 end
             end
-            local hrp = myChar:FindFirstChild("HumanoidRootPart") or myChar:FindFirstChild("Torso") or myChar.PrimaryPart
             if hrp then
                 return hrp.CFrame:PointToWorldSpace(Vector3.new(0.85, 0.35, -1.5))
             end
@@ -3082,35 +3116,40 @@ function Library:CreateWorldController()
         end
     end
 
+    local sharedRayParams = RaycastParams.new()
+    sharedRayParams.FilterType = Enum.RaycastFilterType.Exclude
+    sharedRayParams.IgnoreWater = true
+    local lastIgnoreSync = 0
+
     local function RaycastPierceClips(origin, dir, baseIgnore)
-        local params = RaycastParams.new()
-        params.FilterType = Enum.RaycastFilterType.Exclude
-        params.IgnoreWater = true
-        local ignore = table.clone(baseIgnore)
-        params.FilterDescendantsInstances = ignore
+        local now = os.clock()
+        if (now - lastIgnoreSync) > 0.35 then
+            lastIgnoreSync = now
+            sharedRayParams.FilterDescendantsInstances = baseIgnore
+        end
         isInternalRaycast = true
-        for _ = 1, 5 do
-            local hit = workspace:Raycast(origin, dir, params)
+        local currOrigin = origin
+        local targetPt = origin + dir
+        for _ = 1, 7 do
+            local remVec = targetPt - currOrigin
+            local remLen = remVec.Magnitude
+            if remLen <= 0.2 then
+                isInternalRaycast = false
+                return nil
+            end
+            local hit = workspace:Raycast(currOrigin, remVec, sharedRayParams)
             if not hit or not hit.Instance then
                 isInternalRaycast = false
                 return nil
             end
             local inst = hit.Instance
-            local isPlayerPart = false
-            for _, plr in ipairs(Players:GetPlayers()) do
-                if plr ~= LocalPlayer and plr.Character and inst:IsDescendantOf(plr.Character) then
-                    isPlayerPart = true
-                    break
-                end
-            end
-            if isPlayerPart then
-                isInternalRaycast = false
-                return hit
-            end
-            -- Pierce through invisible/semi-transparent Counter Blox clip/trigger/glass parts or non-cancollide barriers
-            if inst.Transparency >= 0.35 or not inst.CanCollide or string.find(string.lower(inst.Name), "clip") or string.find(string.lower(inst.Name), "glass") then
-                table.insert(ignore, inst)
-                params.FilterDescendantsInstances = ignore
+            local isPass = (not inst.CanCollide)
+                or (inst.Transparency >= 0.45)
+                or (inst:FindFirstAncestorOfClass("Accessory") ~= nil)
+                or (inst:FindFirstAncestorOfClass("Hat") ~= nil)
+                or (inst:FindFirstAncestorOfClass("Tool") ~= nil)
+            if isPass then
+                currOrigin = hit.Position + remVec.Unit * 0.08
             else
                 isInternalRaycast = false
                 return hit
@@ -4560,11 +4599,15 @@ function Library:CreateWorldController()
                                 if dist3d > 0.5 then
                                     local angDeg = math.deg(math.acos(math.clamp(cam.CFrame.LookVector:Dot(toPart.Unit), -1, 1)))
                                     local sp, onScr = cam:WorldToViewportPoint(part.Position)
-                                    local fovDistPx = onScr and (Vector2.new(sp.X, sp.Y) - mPos).Magnitude or (angDeg * 14)
+                                    local vp = cam.ViewportSize
+                                    local fovOrigin = (F["ESP_FOVOrigin"] == "Screen Center") and Vector2.new(vp.X * 0.5, vp.Y * 0.5) or mPos
+                                    local fovDistPx = (sp.Z > 0) and (Vector2.new(sp.X, sp.Y) - fovOrigin).Magnitude or math.huge
+                                    local rageCirclePx = rageFovDeg * 1.6
+                                    local enforceCircle = (rageFovDeg < 180) or (F["ESP_ShowFOV"] == true)
 
                                     local inFov = false
                                     if rageActive then
-                                        inFov = (angDeg <= rageFovDeg)
+                                        inFov = enforceCircle and (sp.Z > 0 and fovDistPx <= rageCirclePx) or (angDeg <= rageFovDeg)
                                     else
                                         inFov = onScr and (sp.Z > 0) and (fovDistPx <= legitFovPx) and (fovDistPx >= dzPx)
                                     end
@@ -4576,8 +4619,8 @@ function Library:CreateWorldController()
                                         if okCenter then
                                             chosenPt = part.Position
                                             chosenDmg = dmgCenter
-                                        elseif rageActive and pScale > 0 then
-                                            -- Multipoint edge scan (left / right / top of hitbox)
+                                        elseif rageActive and pScale > 0 and angDeg <= 28 then
+                                            -- Multipoint edge scan (only for targets near crosshair to prevent raycast lag spikes)
                                             local sz = part.Size
                                             local offsets = {
                                                 part.CFrame.RightVector * (sz.X * pScale),
