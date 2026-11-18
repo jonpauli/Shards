@@ -457,7 +457,7 @@ end
 local LeftPanel = Create("Frame", {
     BackgroundColor3 = Theme.Groupbox,
     Position = UDim2.fromOffset(10, 48),
-    Size = UDim2.fromOffset(250, 332),
+    Size = UDim2.fromOffset(255, 332),
     ZIndex = 11,
     Parent = MainFrame,
 })
@@ -559,8 +559,8 @@ Create("UIListLayout", {
 -- ============================================================================
 local RightPanel = Create("Frame", {
     BackgroundColor3 = Theme.Groupbox,
-    Position = UDim2.fromOffset(270, 48),
-    Size = UDim2.fromOffset(320, 332),
+    Position = UDim2.fromOffset(275, 48),
+    Size = UDim2.fromOffset(315, 332),
     ZIndex = 11,
     Parent = MainFrame,
 })
@@ -728,7 +728,7 @@ end
 -- Auto-Load Toggle Row
 local AutoRow = Create("Frame", {
     BackgroundTransparency = 1,
-    Position = UDim2.fromOffset(9, 235),
+    Position = UDim2.fromOffset(9, 240),
     Size = UDim2.new(1, -18, 0, 18),
     ZIndex = 12,
     Parent = RightPanel,
@@ -773,8 +773,8 @@ end)
 local LoadBtn = Create("TextButton", {
     BackgroundColor3 = Color3.new(1, 1, 1),
     AutoButtonColor = false,
-    Position = UDim2.fromOffset(8, 265),
-    Size = UDim2.new(1, -16, 0, 55),
+    Position = UDim2.fromOffset(8, 275),
+    Size = UDim2.new(1, -16, 0, 45),
     Font = Enum.Font.GothamBold,
     Text = "LOAD SELECTED MODULE",
     TextColor3 = Color3.fromRGB(10, 10, 12),
