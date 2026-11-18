@@ -72,11 +72,11 @@ end
 local Window = Library:CreateWindow({ Title = "shards.cc // apocalypse rising 2", Center = true, AutoShow = true })
 
 local Tabs = {
-    Combat = Window:AddTab({ Title = "Combat", Icon = "crosshair" }),
-    Visuals = Window:AddTab({ Title = "Visuals", Icon = "scan" }),
-    Movement = Window:AddTab({ Title = "Movement", Icon = "activity" }),
-    World = Window:AddTab({ Title = "World", Icon = "globe" }),
-    Settings = Window:AddTab({ Title = "Settings", Icon = "sliders" }),
+    Combat = Window:AddTab({ Name = "Combat", Icon = "crosshair" }),
+    Visuals = Window:AddTab({ Name = "Visuals", Icon = "scan" }),
+    Movement = Window:AddTab({ Name = "Movement", Icon = "activity" }),
+    World = Window:AddTab({ Name = "World", Icon = "globe" }),
+    Settings = Window:AddTab({ Name = "Settings", Icon = "sliders" }),
 }
 
 local AimbotGrp = Tabs.Combat:AddLeftGroupbox("Aimbot", "target")
@@ -86,12 +86,7 @@ AimbotGrp:AddDropdown({ Flag = "Aimbot_Hitbox", Name = "Hitbox", Options = {"Hea
 AimbotGrp:AddSlider({ Flag = "Aimbot_FOV", Name = "FOV Radius", Min = 10, Max = 800, Default = 150 })
 AimbotGrp:AddSlider({ Flag = "Aimbot_Smoothness", Name = "Smoothness", Min = 1, Max = 10, Default = 1 })
 
-local GunModsGrp = Tabs.Combat:AddRightGroupbox("Gun Mods", "cpu")
-GunModsGrp:AddToggle({ Flag = "Gun_ModsEnabled", Name = "Enable Gun Mods (Apply)" })
-GunModsGrp:AddToggle({ Flag = "Gun_NoRecoil", Name = "No Recoil" })
-GunModsGrp:AddToggle({ Flag = "Gun_NoSpread", Name = "No Spread" })
-GunModsGrp:AddToggle({ Flag = "Gun_InstaEquip", Name = "Instant Equip" })
-GunModsGrp:AddToggle({ Flag = "Gun_HitboxExp", Name = "Hitbox Expander" })
+
 
 local PlayerEspGrp = Tabs.Visuals:AddLeftGroupbox("Player ESP", "users")
 PlayerEspGrp:AddToggle({ Flag = "ESP_Enabled", Name = "Enable ESP" }):AddKeybind({ Flag = "ESP_Key", Mode = "Toggle", Key = "None" })
@@ -108,10 +103,7 @@ WorldEspGrp:AddToggle({ Flag = "ESP_Vehicles", Name = "Vehicles" }):AddColorPick
 WorldEspGrp:AddSlider({ Flag = "ESP_WorldMaxDist", Name = "World Max Dist", Min = 50, Max = 1000, Default = 300, Suffix = "st" })
 
 local MoveGrp = Tabs.Movement:AddLeftGroupbox("Movement", "activity")
-MoveGrp:AddToggle({ Flag = "Move_Speed", Name = "CFrame Speedhack" }):AddKeybind({ Flag = "Move_SpeedKey", Mode = "Hold", Key = "None" })
-MoveGrp:AddSlider({ Flag = "Move_SpeedAmt", Name = "Speed Amount", Min = 0.1, Max = 3, Default = 0.5, Decimals = 1 })
-MoveGrp:AddToggle({ Flag = "Move_Noclip", Name = "Safe Noclip" }):AddKeybind({ Flag = "Move_NoclipKey", Mode = "Toggle", Key = "None" })
-MoveGrp:AddToggle({ Flag = "Move_InfStam", Name = "Infinite Stamina" })
+
 
 local EnvGrp = Tabs.World:AddLeftGroupbox("Environment", "sun")
 EnvGrp:AddToggle({ Flag = "Env_Fullbright", Name = "Fullbright" })
@@ -223,20 +215,7 @@ Cache.Connections.RenderStepped = RunService.RenderStepped:Connect(function(delt
             local dist = (Camera.CFrame.Position - root.Position).Magnitude
             if dist > Flags.ESP_MaxDist then onScreen = false end
             
-            -- Hitbox Expander logic
-            local head = char:FindFirstChild("Head")
-            if head then
-                if Flags.Gun_HitboxExp then
-                    if not Cache.OriginalStats[player] then Cache.OriginalStats[player] = head.Size end
-                    head.Size = Vector3.new(4, 4, 4)
-                    head.Transparency = 0.6
-                else
-                    if Cache.OriginalStats[player] then
-                        head.Size = Cache.OriginalStats[player]
-                        head.Transparency = 0
-                    end
-                end
-            end
+            
         end
         
         if isAlive and onScreen then
@@ -352,21 +331,7 @@ Cache.Connections.RenderStepped = RunService.RenderStepped:Connect(function(delt
         end
     end
     
-    -- 4. Speedhack & Noclip
-    local myChar = LocalPlayer.Character
-    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
-    local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
     
-    if myRoot and myHum then
-        if Flags.Move_Speed and Flags.Move_SpeedKey and myHum.MoveDirection.Magnitude > 0 then
-            myRoot.CFrame = myRoot.CFrame + (myHum.MoveDirection * Flags.Move_SpeedAmt)
-        end
-        if Flags.Move_Noclip and Flags.Move_NoclipKey then
-            for _, part in ipairs(myChar:GetChildren()) do
-                if part:IsA("BasePart") then part.CanCollide = false end
-            end
-        end
-    end
     
     -- 5. Environment
     if Flags.Env_Fullbright then
@@ -392,35 +357,9 @@ task.spawn(function()
             end
         end
         
-        -- Gun Mods (Scanning GC for Weapon Config Tables)
-        if Flags.Gun_ModsEnabled then
-            for _, v in pairs(getgc(true)) do
-                if type(v) == "table" and rawget(v, "RecoilMin") and rawget(v, "Spread") then
-                    if Flags.Gun_NoRecoil then
-                        rawset(v, "RecoilMin", 0)
-                        rawset(v, "RecoilMax", 0)
-                        rawset(v, "CameraKickMin", Vector3.zero)
-                        rawset(v, "CameraKickMax", Vector3.zero)
-                    end
-                    if Flags.Gun_NoSpread then
-                        rawset(v, "Spread", 0)
-                        rawset(v, "WalkSpread", 0)
-                    end
-                    if Flags.Gun_InstaEquip then
-                        rawset(v, "EquipTime", 0)
-                    end
-                end
-            end
-        end
         
-        -- Infinite Stamina (AR2 uses specific controllers, generic spoof via LocalScript GC if exposed)
-        if Flags.Move_InfStam then
-            for _, v in pairs(getgc(true)) do
-                if type(v) == "table" and rawget(v, "Stamina") and rawget(v, "MaxStamina") then
-                    rawset(v, "Stamina", rawget(v, "MaxStamina"))
-                end
-            end
-        end
+        
+        
     end
 end)
 
@@ -462,13 +401,7 @@ Library.OnUnload = function()
     for _, draw in pairs(Cache.Vehicles) do draw:Remove() end
     if HUD.Watermark then HUD.Watermark:Remove() end
     
-    -- Revert hitbox expansions
-    for player, size in pairs(Cache.OriginalStats) do
-        if player and player.Character and player.Character:FindFirstChild("Head") then
-            player.Character.Head.Size = size
-            player.Character.Head.Transparency = 0
-        end
-    end
+    
 end
 
 Library:Notify({ Title = "shards.cc", Text = "Apoc 2 Loaded fully. Toggle menu with Insert.", Duration = 4 })
