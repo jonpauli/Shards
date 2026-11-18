@@ -56,15 +56,6 @@ local Theme = {
     Warning         = Color3.fromRGB(240, 180, 65),
 }
 
-local Presets = {
-    ["Skeet Lime"] = { Accent = Color3.fromRGB(155, 195, 55),  AccentDark = Color3.fromRGB(98, 128, 28)  },
-    ["Neverlose"]  = { Accent = Color3.fromRGB(55, 165, 245),  AccentDark = Color3.fromRGB(25, 105, 175) },
-    ["Fatality"]   = { Accent = Color3.fromRGB(225, 45, 95),   AccentDark = Color3.fromRGB(145, 20, 58)  },
-    ["Onetap"]     = { Accent = Color3.fromRGB(235, 155, 45),  AccentDark = Color3.fromRGB(165, 98, 18)  },
-    ["Primordial"] = { Accent = Color3.fromRGB(185, 115, 245), AccentDark = Color3.fromRGB(115, 62, 168) },
-    ["Aimware"]    = { Accent = Color3.fromRGB(220, 50, 50),   AccentDark = Color3.fromRGB(140, 25, 25)  },
-}
-local PresetOrder = { "Skeet Lime", "Neverlose", "Fatality", "Onetap", "Primordial", "Aimware" }
 
 local Icons = {
     ["crosshair"] = "rbxassetid://10709818534",
@@ -163,7 +154,6 @@ local GamesRegistry = {
 local LoaderFolder = "ShardsCSGO"
 local LoaderConfigFile = LoaderFolder .. "/loader.json"
 local LoaderSettings = {
-    Theme = "Skeet Lime",
     AutoLoad = false,
     LastGameId = nil,
 }
@@ -184,9 +174,6 @@ local function LoadLoaderSettings()
         if isfile and readfile and isfile(LoaderConfigFile) then
             local data = HttpService:JSONDecode(readfile(LoaderConfigFile))
             if type(data) == "table" then
-                if type(data.Theme) == "string" and Presets[data.Theme] then
-                    LoaderSettings.Theme = data.Theme
-                end
                 if type(data.AutoLoad) == "boolean" then
                     LoaderSettings.AutoLoad = data.AutoLoad
                 end
@@ -199,10 +186,6 @@ local function LoadLoaderSettings()
 end
 
 LoadLoaderSettings()
-if Presets[LoaderSettings.Theme] then
-    Theme.Accent = Presets[LoaderSettings.Theme].Accent
-    Theme.AccentDark = Presets[LoaderSettings.Theme].AccentDark
-end
 
 -- ============================================================================
 -- UI HELPER FUNCTIONS
@@ -742,63 +725,10 @@ for i = 1, 4 do
     featLabels[i] = fl
 end
 
--- Theme Preset Swatch Row
-local ThemeLabel = Create("TextLabel", {
-    BackgroundTransparency = 1,
-    Position = UDim2.fromOffset(9, 180),
-    Size = UDim2.fromOffset(95, 18),
-    Font = Enum.Font.Code,
-    Text = "Accent Theme:",
-    TextColor3 = Theme.TextDim,
-    TextSize = 11,
-    TextXAlignment = Enum.TextXAlignment.Left,
-    ZIndex = 12,
-    Parent = RightPanel,
-})
-
-local SwatchTray = Create("Frame", {
-    BackgroundTransparency = 1,
-    Position = UDim2.fromOffset(105, 180),
-    Size = UDim2.new(1, -113, 0, 18),
-    ZIndex = 12,
-    Parent = RightPanel,
-})
-Create("UIListLayout", {
-    FillDirection = Enum.FillDirection.Horizontal,
-    HorizontalAlignment = Enum.HorizontalAlignment.Right,
-    Padding = UDim.new(0, 5),
-    Parent = SwatchTray,
-})
-
-local swatchStrokes = {}
-for _, pName in ipairs(PresetOrder) do
-    local pData = Presets[pName]
-    local sw = Create("TextButton", {
-        BackgroundColor3 = pData.Accent,
-        AutoButtonColor = false,
-        Size = UDim2.fromOffset(18, 16),
-        Text = "",
-        ZIndex = 13,
-        Parent = SwatchTray,
-    })
-    local st = ApplyCSBorder(sw, (LoaderSettings.Theme == pName) and Color3.new(1, 1, 1) or Theme.InnerBorder)
-    swatchStrokes[pName] = st
-    Connect(sw.MouseButton1Click, function()
-        LoaderSettings.Theme = pName
-        Theme.Accent = pData.Accent
-        Theme.AccentDark = pData.AccentDark
-        for k, s in pairs(swatchStrokes) do
-            Tween(s, TweenFast, { Color = (k == pName) and Color3.new(1, 1, 1) or Theme.InnerBorder })
-        end
-        RefreshAccentTheme()
-        SaveLoaderSettings()
-    end)
-end
-
 -- Auto-Load Toggle Row
 local AutoRow = Create("Frame", {
     BackgroundTransparency = 1,
-    Position = UDim2.fromOffset(9, 204),
+    Position = UDim2.fromOffset(9, 184),
     Size = UDim2.new(1, -18, 0, 18),
     ZIndex = 12,
     Parent = RightPanel,
@@ -843,8 +773,8 @@ end)
 local LoadBtn = Create("TextButton", {
     BackgroundColor3 = Color3.new(1, 1, 1),
     AutoButtonColor = false,
-    Position = UDim2.fromOffset(8, 232),
-    Size = UDim2.new(1, -16, 0, 30),
+    Position = UDim2.fromOffset(8, 214),
+    Size = UDim2.new(1, -16, 0, 50),
     Font = Enum.Font.GothamBold,
     Text = "LOAD SELECTED MODULE",
     TextColor3 = Color3.fromRGB(10, 10, 12),
@@ -1128,7 +1058,7 @@ local function ExecuteSelectedGame(gameEntry)
     local ctx = {
         GameId = gameEntry.Id,
         GameName = gameEntry.Name,
-        Theme = LoaderSettings.Theme,
+        Theme = "Skeet Lime",
         Accent = Theme.Accent,
         AccentDark = Theme.AccentDark,
         PlaceId = currentPlaceId,
@@ -1153,7 +1083,6 @@ local function ExecuteSelectedGame(gameEntry)
         if lib and lib.SetAccent then
             pcall(function()
                 lib:SetAccent(Theme.Accent, Theme.AccentDark)
-                lib:SyncOptionValue("UI_ThemePreset", LoaderSettings.Theme)
             end)
         end
     end)
