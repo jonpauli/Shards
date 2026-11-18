@@ -255,8 +255,6 @@ Cache.Connections.RenderStepped = RunService.RenderStepped:Connect(function(dt)
         if isAlive then
             local isTeam = (Flags.ESP_TeamCheck and player.Team == LocalPlayer.Team and player.Team ~= nil)
             if isTeam then isAlive = false end
-        end
-            
 
             -- Chams
             if Flags.Cham_Enabled then
@@ -279,8 +277,10 @@ Cache.Connections.RenderStepped = RunService.RenderStepped:Connect(function(dt)
             if Flags.ESP_Enabled then
                 pos, onScreen = Camera:WorldToViewportPoint(root.Position)
             end
-        elseif Cache.Chams[player] then
-            Cache.Chams[player].Enabled = false
+        else
+            if Cache.Chams[player] then
+                Cache.Chams[player].Enabled = false
+            end
         end
 
         if isAlive and onScreen and Flags.ESP_Enabled then
