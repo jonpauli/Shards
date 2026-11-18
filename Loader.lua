@@ -341,7 +341,7 @@ local MainFrame = Create("Frame", {
     AnchorPoint = Vector2.new(0.5, 0.5),
     BackgroundColor3 = Theme.Background,
     Position = UDim2.fromScale(0.5, 0.5),
-    Size = UDim2.fromOffset(520, 360),
+    Size = UDim2.fromOffset(600, 420),
     ZIndex = 10,
     Parent = ScreenGui,
 })
@@ -384,7 +384,7 @@ Create("TextLabel", {
     Font = Enum.Font.GothamBold,
     Text = "SHARDS.CC",
     TextColor3 = Theme.Text,
-    TextSize = 13,
+    TextSize = 15,
     TextXAlignment = Enum.TextXAlignment.Left,
     ZIndex = 12,
     Parent = Header,
@@ -394,10 +394,10 @@ Create("TextLabel", {
     BackgroundTransparency = 1,
     Position = UDim2.fromOffset(112, 0),
     Size = UDim2.fromOffset(260, 32),
-    Font = Enum.Font.Code,
+    Font = Enum.Font.GothamMedium,
     Text = "// multi-game loader v2.4",
     TextColor3 = Theme.TextMuted,
-    TextSize = 12,
+    TextSize = 13,
     TextXAlignment = Enum.TextXAlignment.Left,
     ZIndex = 12,
     Parent = Header,
@@ -456,8 +456,8 @@ end
 -- ============================================================================
 local LeftPanel = Create("Frame", {
     BackgroundColor3 = Theme.Groupbox,
-    Position = UDim2.fromOffset(10, 44),
-    Size = UDim2.fromOffset(215, 272),
+    Position = UDim2.fromOffset(10, 48),
+    Size = UDim2.fromOffset(250, 332),
     ZIndex = 11,
     Parent = MainFrame,
 })
@@ -523,7 +523,7 @@ local SearchBox = Create("TextBox", {
     BackgroundTransparency = 1,
     Position = UDim2.fromOffset(22, 0),
     Size = UDim2.new(1, -26, 1, 0),
-    Font = Enum.Font.Code,
+    Font = Enum.Font.GothamMedium,
     PlaceholderText = "filter games...",
     PlaceholderColor3 = Theme.TextMuted,
     Text = "",
@@ -559,8 +559,8 @@ Create("UIListLayout", {
 -- ============================================================================
 local RightPanel = Create("Frame", {
     BackgroundColor3 = Theme.Groupbox,
-    Position = UDim2.fromOffset(235, 44),
-    Size = UDim2.fromOffset(275, 272),
+    Position = UDim2.fromOffset(270, 48),
+    Size = UDim2.fromOffset(320, 332),
     ZIndex = 11,
     Parent = MainFrame,
 })
@@ -620,7 +620,7 @@ local StatusBadge = Create("TextLabel", {
 local InfoCard = Create("Frame", {
     BackgroundColor3 = Theme.Element,
     Position = UDim2.fromOffset(8, 32),
-    Size = UDim2.new(1, -16, 0, 60),
+    Size = UDim2.new(1, -16, 0, 75),
     ZIndex = 12,
     Parent = RightPanel,
 })
@@ -633,7 +633,7 @@ local GameTitleLbl = Create("TextLabel", {
     Font = Enum.Font.GothamBold,
     Text = selectedGame.Name,
     TextColor3 = Theme.Text,
-    TextSize = 13,
+    TextSize = 16,
     TextXAlignment = Enum.TextXAlignment.Left,
     ZIndex = 13,
     Parent = InfoCard,
@@ -644,7 +644,7 @@ local VersionBadge = Create("TextLabel", {
     BackgroundTransparency = 1,
     Position = UDim2.new(1, -8, 0, 6),
     Size = UDim2.fromOffset(50, 14),
-    Font = Enum.Font.Code,
+    Font = Enum.Font.GothamMedium,
     Text = selectedGame.Version,
     TextSize = 11,
     TextXAlignment = Enum.TextXAlignment.Right,
@@ -655,9 +655,9 @@ BindAccent(VersionBadge, "TextColor3")
 
 local GameSubLbl = Create("TextLabel", {
     BackgroundTransparency = 1,
-    Position = UDim2.fromOffset(8, 21),
+    Position = UDim2.fromOffset(8, 28),
     Size = UDim2.new(1, -16, 0, 14),
-    Font = Enum.Font.Code,
+    Font = Enum.Font.GothamMedium,
     Text = selectedGame.SubTitle,
     TextColor3 = Theme.TextDim,
     TextSize = 11,
@@ -676,9 +676,9 @@ end)
 
 local PlaceInfoLbl = Create("TextLabel", {
     BackgroundTransparency = 1,
-    Position = UDim2.fromOffset(8, 41),
+    Position = UDim2.fromOffset(8, 48),
     Size = UDim2.new(1, -16, 0, 14),
-    Font = Enum.Font.Code,
+    Font = Enum.Font.GothamMedium,
     Text = string.format("PlaceId: %d  |  Env: %s", currentPlaceId, execName),
     TextColor3 = Theme.TextMuted,
     TextSize = 10,
@@ -690,8 +690,8 @@ local PlaceInfoLbl = Create("TextLabel", {
 -- Feature List Box
 local FeatBox = Create("Frame", {
     BackgroundColor3 = Theme.Background,
-    Position = UDim2.fromOffset(8, 100),
-    Size = UDim2.new(1, -16, 0, 72),
+    Position = UDim2.fromOffset(8, 120),
+    Size = UDim2.new(1, -16, 0, 100),
     ZIndex = 12,
     Parent = RightPanel,
 })
@@ -714,10 +714,10 @@ for i = 1, 4 do
         BackgroundTransparency = 1,
         LayoutOrder = i,
         Size = UDim2.new(1, -12, 0, 14),
-        Font = Enum.Font.Code,
+        Font = Enum.Font.GothamMedium,
         Text = "",
         TextColor3 = Theme.TextDim,
-        TextSize = 11,
+        TextSize = 13,
         TextXAlignment = Enum.TextXAlignment.Left,
         ZIndex = 13,
         Parent = FeatBox,
@@ -728,7 +728,7 @@ end
 -- Auto-Load Toggle Row
 local AutoRow = Create("Frame", {
     BackgroundTransparency = 1,
-    Position = UDim2.fromOffset(9, 180),
+    Position = UDim2.fromOffset(9, 235),
     Size = UDim2.new(1, -18, 0, 18),
     ZIndex = 12,
     Parent = RightPanel,
@@ -746,7 +746,7 @@ local AutoLbl = Create("TextLabel", {
     BackgroundTransparency = 1,
     Position = UDim2.fromOffset(18, 0),
     Size = UDim2.new(1, -18, 1, 0),
-    Font = Enum.Font.Code,
+    Font = Enum.Font.GothamMedium,
     Text = "Auto-load detected game on launch",
     TextColor3 = LoaderSettings.AutoLoad and Theme.Text or Theme.TextDim,
     TextSize = 11,
@@ -773,12 +773,12 @@ end)
 local LoadBtn = Create("TextButton", {
     BackgroundColor3 = Color3.new(1, 1, 1),
     AutoButtonColor = false,
-    Position = UDim2.fromOffset(8, 206),
-    Size = UDim2.new(1, -16, 0, 58),
+    Position = UDim2.fromOffset(8, 265),
+    Size = UDim2.new(1, -16, 0, 55),
     Font = Enum.Font.GothamBold,
     Text = "LOAD SELECTED MODULE",
     TextColor3 = Color3.fromRGB(10, 10, 12),
-    TextSize = 12,
+    TextSize = 14,
     ZIndex = 13,
     Parent = RightPanel,
 })
@@ -797,7 +797,7 @@ table.insert(GradientObjects, loadGrad)
 -- Bottom Console Status & Progress Bar
 local BottomBar = Create("Frame", {
     BackgroundColor3 = Theme.Groupbox,
-    Position = UDim2.fromOffset(10, 322),
+    Position = UDim2.fromOffset(10, 382),
     Size = UDim2.new(1, -20, 0, 28),
     ZIndex = 11,
     Parent = MainFrame,
@@ -808,7 +808,7 @@ local StatusText = Create("TextLabel", {
     BackgroundTransparency = 1,
     Position = UDim2.fromOffset(8, 0),
     Size = UDim2.new(1, -16, 1, -3),
-    Font = Enum.Font.Code,
+    Font = Enum.Font.GothamMedium,
     Text = detectedGame
         and string.format("[shards.cc] auto-detected '%s' (%d)", detectedGame.Name, currentPlaceId)
         or string.format("[shards.cc] ready // place %d (universal profile)", currentPlaceId),
@@ -931,7 +931,7 @@ for idx, g in ipairs(GamesRegistry) do
         BackgroundTransparency = 1,
         Position = UDim2.fromOffset(9, 19),
         Size = UDim2.new(1, -14, 0, 14),
-        Font = Enum.Font.Code,
+        Font = Enum.Font.GothamMedium,
         Text = isDet and "[DETECTED] " .. g.SubTitle or g.SubTitle,
         TextColor3 = isDet and Theme.Accent or Theme.TextMuted,
         TextSize = 10,
