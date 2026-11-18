@@ -5026,119 +5026,6 @@ end
 function Library:BuildConfigTab(tab)
     local themeGroup = tab:AddLeftGroupbox("Menu & Theme", "palette")
 
-    local wmToggle = themeGroup:AddToggle({
-        Name = "Show Watermark",
-        Flag = "UI_ShowWatermark",
-        Default = false,
-        Callback = function(v)
-            if self.Watermark then self.Watermark:SetVisible(v) end
-        end
-    })
-    local wmSub = wmToggle:AddSubSection()
-    wmSub:AddInput({
-        Name = "Custom Watermark Title",
-        Flag = "UI_WatermarkText",
-        Default = "shards.cc | counter-strike",
-        Placeholder = "shards.cc | cs2",
-        Callback = function(txt)
-            if self.Watermark and self.Watermark.Refresh then
-                self.Watermark.Refresh()
-            end
-        end
-    })
-    wmSub:AddDropdown({
-        Name = "Watermark Telemetry Fields",
-        Flag = "UI_WatermarkFields",
-        Multi = true,
-        Values = { "User", "FPS", "Ping", "Time", "Build" },
-        Default = { "User", "FPS", "Ping", "Time" },
-        Callback = function()
-            if self.Watermark and self.Watermark.Refresh then
-                self.Watermark.Refresh()
-            end
-        end
-    })
-    wmSub:AddSlider({
-        Name = "Watermark Background Transparency",
-        Flag = "UI_WatermarkAlpha",
-        Min = 0,
-        Max = 0.8,
-        Rounding = 2,
-        Default = 0,
-        Callback = function()
-            if self.Watermark and self.Watermark.Refresh then
-                self.Watermark.Refresh()
-            end
-        end
-    })
-
-    local kbToggle = themeGroup:AddToggle({
-        Name = "Show Keybind List",
-        Flag = "UI_ShowKeybinds",
-        Default = false,
-        Callback = function(v)
-            if self.KeybindList then self.KeybindList:SetVisible(v) end
-        end
-    })
-    local kbSub = kbToggle:AddSubSection()
-    kbSub:AddDropdown({
-        Name = "Keybind List Mode",
-        Flag = "UI_KeybindListMode",
-        Values = { "Active Binds Only", "Show All Binds" },
-        Default = "Active Binds Only",
-        Callback = function()
-            if self.KeybindList then self.KeybindList:Refresh() end
-        end
-    })
-
-    themeGroup:AddToggle({
-        Name = "Lock HUD Panel Positions",
-        Flag = "UI_LockHUD",
-        Default = false,
-    })
-
-    themeGroup:AddToggle({
-        Name = "Pause Keybinds While Menu Open",
-        Flag = "UI_MenuPauseBinds",
-        Default = false,
-    })
-
-    themeGroup:AddToggle({
-        Name = "Show Spectator List",
-        Flag = "UI_ShowSpectators",
-        Default = false,
-        Callback = function(v)
-            if self.SpectatorList then self.SpectatorList:SetVisible(v) end
-        end
-    })
-
-    themeGroup:AddToggle({
-        Name = "Show Target HUD",
-        Flag = "UI_ShowTargetHUD",
-        Default = false,
-        Callback = function(v)
-            if self.TargetHUD then self.TargetHUD:SetVisible(v) end
-        end
-    })
-
-    themeGroup:AddToggle({
-        Name = "Show Crosshair Indicators",
-        Flag = "UI_ShowIndicators",
-        Default = false,
-        Callback = function(v)
-            if self.Indicators then self.Indicators:SetVisible(v) end
-        end
-    })
-
-    themeGroup:AddToggle({
-        Name = "Show 2D Radar Window",
-        Flag = "UI_ShowRadar",
-        Default = false,
-        Callback = function(v)
-            if self.Radar then self.Radar:SetVisible(v) end
-        end
-    })
-
     local menuBindLbl = themeGroup:AddLabel("Menu Toggle Key")
     menuBindLbl:AddKeybind({
         Name = "Menu Key",
@@ -5201,7 +5088,6 @@ function Library:BuildConfigTab(tab)
             if fontScaleSlider then
                 fontScaleSlider:Set(self.FontScale)
             end
-            if self.KeybindList then self.KeybindList:Refresh() end
         end
     })
 
@@ -5216,17 +5102,6 @@ function Library:BuildConfigTab(tab)
         Callback = function(sc)
             self.FontScale = sc
             self:RefreshAllText()
-            if self.KeybindList then self.KeybindList:Refresh() end
-        end
-    })
-
-    themeGroup:AddToggle({
-        Name = "1px Black Text Outline",
-        Flag = "UI_TextStroke",
-        Default = self.TextStroke,
-        Callback = function(state)
-            self.TextStroke = state
-            self:RefreshAllText()
         end
     })
 
@@ -5240,30 +5115,10 @@ function Library:BuildConfigTab(tab)
         end
     })
 
-    -- Right Side Config Manager
     local cfgGroup = tab:AddRightGroupbox("Configuration", "file-text")
-    local cfgName = "legit_default"
-    local selectedCfg = "legit_default"
-    local autoloadCfg = "none"
-    local cfgNames = { "legit_default", "rage_hvh", "movement_bhop", "closet_main" }
-    local savedMemoryConfigs = {
-        ["legit_default"] = self:GetConfigJSON(),
-        ["rage_hvh"] = self:GetConfigJSON({
-            Rage_Enabled = true, Rage_Silent = true, Rage_AutoFire = true, Rage_Autowall = true,
-            Rage_NoRecoil = true, Rage_NoSpread = true,
-            Rage_Hitchance = 78, Rage_MinDmg = 55, Rage_DT = true, AA_Enabled = true, FL_Enable = true,
-            ESP_Box = true, ESP_Name = true, ESP_Health = true, Chams_Vis = true, Chams_XQZ = true,
-            UI_ShowWatermark = true, UI_ShowKeybinds = true, UI_ShowIndicators = true, Misc_ShowIndicators = true,
-        }),
-        ["movement_bhop"] = self:GetConfigJSON({
-            Misc_Bhop = true, Misc_Strafe = true, Misc_FastStop = true,
-            UI_ShowWatermark = true, UI_ShowKeybinds = true,
-        }),
-        ["closet_main"] = self:GetConfigJSON({
-            Legit_Enable = true, Legit_Smooth = 8.5, Legit_FOV = 3.5, Legit_RCS = true,
-            ESP_Box = true, ESP_Name = true, ESP_Health = true,
-        }),
-    }
+    local cfgName = "default"
+    local selectedCfg = "default"
+    local cfgNames = { "default" }
 
     pcall(function()
         if isfolder and makefolder then
@@ -5271,27 +5126,19 @@ function Library:BuildConfigTab(tab)
         end
         if listfiles and isfolder and isfolder(self.Folder) then
             for _, filePath in ipairs(listfiles(self.Folder)) do
-                local fn = tostring(filePath):match("([^/\\]+)%.json$")
+                local fn = tostring(filePath):match("([^/\\\]+)%.json$")
                 if fn and not table.find(cfgNames, fn) then
                     table.insert(cfgNames, fn)
                 end
             end
         end
-        if isfile and readfile and isfile(self.Folder .. "/autoload.txt") then
-            local rawAuto = readfile(self.Folder .. "/autoload.txt"):gsub("%s+", "")
-            if rawAuto ~= "" then
-                autoloadCfg = rawAuto
-            end
-        end
     end)
-
-    local autoStatusLbl = cfgGroup:AddLabel("Autoload Profile: " .. autoloadCfg)
 
     local cfgNameInput = cfgGroup:AddInput({
         Name = "Config Name",
         Flag = "UI_ConfigName",
-        Default = "legit_default",
-        Placeholder = "e.g. rage_semi",
+        Default = "default",
+        Placeholder = "e.g. settings",
         Callback = function(txt)
             local trimmed = tostring(txt or ""):gsub("^%s*(.-)%s*$", "%1")
             cfgName = trimmed
@@ -5303,7 +5150,7 @@ function Library:BuildConfigTab(tab)
         Flag = "UI_ConfigList",
         Height = 95,
         Values = cfgNames,
-        Default = "legit_default",
+        Default = "default",
         Callback = function(val)
             selectedCfg = val
             cfgName = val
@@ -5317,9 +5164,8 @@ function Library:BuildConfigTab(tab)
         Name = "Save Config",
         Icon = "save",
         Callback = function()
-            local target = (cfgName and cfgName ~= "") and cfgName or selectedCfg or "legit_default"
+            local target = (cfgName and cfgName ~= "") and cfgName or selectedCfg or "default"
             local json = self:GetConfigJSON()
-            savedMemoryConfigs[target] = json
             pcall(function()
                 if isfolder and makefolder and writefile then
                     if not isfolder(self.Folder) then makefolder(self.Folder) end
@@ -5328,154 +5174,57 @@ function Library:BuildConfigTab(tab)
             end)
             if not table.find(cfgList.Values, target) then
                 table.insert(cfgList.Values, target)
-                cfgList:Refresh(cfgList.Values)
+                table.sort(cfgList.Values)
+                cfgList:Refresh()
             end
-            selectedCfg = target
-            cfgList:Set(target)
-            self:Notify({ Title = "Config Saved", Description = "Saved profile '" .. target .. "'.", Icon = "save" })
+            self:Notify({ Title = "Config Saved", Description = "Successfully saved '" .. target .. "'.", Icon = "check" })
         end
     })
 
-    createBtn:AddButton({
+    local loadBtn = cfgGroup:AddButton({
         Name = "Load Config",
         Icon = "download",
         Callback = function()
-            local raw = savedMemoryConfigs[selectedCfg]
+            local target = (cfgName and cfgName ~= "") and cfgName or selectedCfg or "default"
+            local loaded = false
             pcall(function()
-                if isfile and readfile and isfile(self.Folder .. "/" .. selectedCfg .. ".json") then
-                    raw = readfile(self.Folder .. "/" .. selectedCfg .. ".json")
+                if isfolder and isfile and readfile and isfile(self.Folder .. "/" .. target .. ".json") then
+                    local json = readfile(self.Folder .. "/" .. target .. ".json")
+                    self:LoadConfigJSON(json)
+                    loaded = true
                 end
             end)
-            if raw then
-                self:LoadConfigJSON(raw)
-            else
-                self:Notify({ Title = "Config", Description = "Loaded preset '" .. tostring(selectedCfg) .. "'.", Icon = "check" })
+            if not loaded then
+                self:Notify({ Title = "Config Load Failed", Description = "Config '" .. target .. "' not found on disk.", Icon = "x" })
             end
         end
     })
 
-    local autoBtn = cfgGroup:AddButton({
-        Name = "Set Autoload",
-        Icon = "shield-check",
+    local refreshBtn = cfgGroup:AddButton({
+        Name = "Refresh List",
+        Icon = "refresh-cw",
         Callback = function()
-            local target = selectedCfg or (cfgName ~= "" and cfgName) or "legit_default"
-            autoloadCfg = target
-            autoStatusLbl:SetText("Autoload Profile: " .. autoloadCfg)
             pcall(function()
-                if isfolder and makefolder and writefile then
-                    if not isfolder(self.Folder) then makefolder(self.Folder) end
-                    writefile(self.Folder .. "/autoload.txt", target)
-                    if not isfile or not isfile(self.Folder .. "/" .. target .. ".json") then
-                        writefile(self.Folder .. "/" .. target .. ".json", savedMemoryConfigs[target] or self:GetConfigJSON())
+                if listfiles and isfolder and isfolder(self.Folder) then
+                    local newNames = {}
+                    for _, filePath in ipairs(listfiles(self.Folder)) do
+                        local fn = tostring(filePath):match("([^/\\\]+)%.json$")
+                        if fn then
+                            table.insert(newNames, fn)
+                        end
                     end
-                end
-            end)
-            self:Notify({ Title = "Autoload Set", Description = "Profile '" .. target .. "' will auto-load on launch.", Icon = "shield-check" })
-        end
-    })
-
-    autoBtn:AddButton({
-        Name = "Clear Autoload",
-        Icon = "x",
-        Callback = function()
-            autoloadCfg = "none"
-            autoStatusLbl:SetText("Autoload Profile: none")
-            pcall(function()
-                if delfile and isfile and isfile(self.Folder .. "/autoload.txt") then
-                    delfile(self.Folder .. "/autoload.txt")
-                elseif writefile then
-                    writefile(self.Folder .. "/autoload.txt", "")
-                end
-            end)
-            self:Notify({ Title = "Autoload Cleared", Description = "Disabled automatic config loading.", Icon = "info" })
-        end
-    })
-
-    local deleteBtn = cfgGroup:AddButton({
-        Name = "Delete Config",
-        Icon = "trash",
-        Risky = true,
-        Confirm = true,
-        Callback = function()
-            local target = selectedCfg
-            if not target then return end
-            savedMemoryConfigs[target] = nil
-            pcall(function()
-                if delfile and isfile and isfile(self.Folder .. "/" .. target .. ".json") then
-                    delfile(self.Folder .. "/" .. target .. ".json")
-                end
-            end)
-            local idx = table.find(cfgList.Values, target)
-            if idx and #cfgList.Values > 1 then
-                table.remove(cfgList.Values, idx)
-                selectedCfg = cfgList.Values[1]
-                cfgName = selectedCfg
-                cfgList:Refresh(cfgList.Values)
-                cfgList:Set(selectedCfg)
-                if cfgNameInput then
-                    cfgNameInput:Set(selectedCfg)
-                end
-            end
-            self:Notify({ Title = "Config Deleted", Description = "Removed profile '" .. tostring(target) .. "'.", Icon = "trash", Color = self.Theme.Risky })
-        end
-    })
-
-    local rawJsonInput = cfgGroup:AddInput({
-        Name = "Clipboard / Raw JSON Payload",
-        Flag = "UI_RawConfigJSON",
-        Default = "",
-        Placeholder = "Paste JSON string or use Import...",
-    })
-
-    deleteBtn:AddButton({
-        Name = "Export JSON",
-        Icon = "clipboard",
-        Callback = function()
-            local json = self:GetConfigJSON()
-            if rawJsonInput then
-                rawJsonInput:Set(json)
-            end
-            pcall(function()
-                if setclipboard then setclipboard(json) end
-            end)
-            self:Notify({ Title = "Clipboard", Description = "Exported JSON config string.", Icon = "clipboard" })
-        end
-    })
-
-    cfgGroup:AddButton({
-        Name = "Import JSON (Input / Clipboard)",
-        Icon = "upload",
-        Callback = function()
-            local payload = rawJsonInput and rawJsonInput.Value or ""
-            if not payload or payload == "" then
-                pcall(function()
-                    if getclipboard then
-                        payload = getclipboard()
+                    table.sort(newNames)
+                    cfgList.Values = newNames
+                    if not table.find(cfgList.Values, cfgName) and #cfgList.Values > 0 then
+                        cfgName = cfgList.Values[1]
+                        selectedCfg = cfgList.Values[1]
                     end
-                end)
-            end
-            if payload and payload ~= "" then
-                self:LoadConfigJSON(payload)
-            else
-                self:Notify({ Title = "Import Error", Description = "Paste a JSON string into the box first.", Icon = "alert-triangle", Color = self.Theme.Risky })
-            end
-        end
-    })
-
-    -- Automatically execute autoload profile if present on disk
-    if autoloadCfg ~= "none" then
-        task.defer(function()
-            local raw = savedMemoryConfigs[autoloadCfg]
-            pcall(function()
-                if isfile and readfile and isfile(self.Folder .. "/" .. autoloadCfg .. ".json") then
-                    raw = readfile(self.Folder .. "/" .. autoloadCfg .. ".json")
+                    cfgList:Refresh()
                 end
             end)
-            if raw then
-                self:LoadConfigJSON(raw)
-            end
-        end)
-    end
+            self:Notify({ Title = "Refreshed", Description = "Config list updated from disk.", Icon = "check" })
+        end
+    })
 end
 
 function Library:Unload()
