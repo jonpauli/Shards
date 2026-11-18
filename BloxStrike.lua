@@ -248,12 +248,14 @@ Cache.Connections.RenderStepped = RunService.RenderStepped:Connect(function(dt)
         local char = player.Character
         local root = char and char:FindFirstChild("HumanoidRootPart")
         local hum = char and char:FindFirstChildOfClass("Humanoid")
-        local isTeam = (Flags.ESP_TeamCheck and player.Team == LocalPlayer.Team and player.Team ~= nil)
-        local isAlive = char and root and hum and hum.Health > 0 and not isTeam
+        local isAlive = char and root and hum and hum.Health > 0
         local onScreen = false
         local pos = Vector3.zero
 
         if isAlive then
+            local isTeam = (Flags.ESP_TeamCheck and player.Team == LocalPlayer.Team and player.Team ~= nil)
+            if isTeam then isAlive = false end
+        end
             
 
             -- Chams
@@ -282,8 +284,8 @@ Cache.Connections.RenderStepped = RunService.RenderStepped:Connect(function(dt)
         end
 
         if isAlive and onScreen and Flags.ESP_Enabled then
-            local tl = Camera:WorldToViewportPoint(root.Position + Vector3.new(0, 3, 0))
-            local br = Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 3.5, 0))
+            local tl, _ = Camera:WorldToViewportPoint(root.Position + Vector3.new(0, 3, 0))
+            local br, _ = Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 3.5, 0))
             local h = math.abs(tl.Y - br.Y)
             local w = h * 0.6
             local x = pos.X - (w / 2)
