@@ -620,7 +620,7 @@ local StatusBadge = Create("TextLabel", {
 local InfoCard = Create("Frame", {
     BackgroundColor3 = Theme.Element,
     Position = UDim2.fromOffset(8, 32),
-    Size = UDim2.new(1, -16, 0, 56),
+    Size = UDim2.new(1, -16, 0, 60),
     ZIndex = 12,
     Parent = RightPanel,
 })
@@ -676,7 +676,7 @@ end)
 
 local PlaceInfoLbl = Create("TextLabel", {
     BackgroundTransparency = 1,
-    Position = UDim2.fromOffset(8, 37),
+    Position = UDim2.fromOffset(8, 41),
     Size = UDim2.new(1, -16, 0, 14),
     Font = Enum.Font.Code,
     Text = string.format("PlaceId: %d  |  Env: %s", currentPlaceId, execName),
@@ -690,8 +690,8 @@ local PlaceInfoLbl = Create("TextLabel", {
 -- Feature List Box
 local FeatBox = Create("Frame", {
     BackgroundColor3 = Theme.Background,
-    Position = UDim2.fromOffset(8, 95),
-    Size = UDim2.new(1, -16, 0, 78),
+    Position = UDim2.fromOffset(8, 100),
+    Size = UDim2.new(1, -16, 0, 72),
     ZIndex = 12,
     Parent = RightPanel,
 })
@@ -728,7 +728,7 @@ end
 -- Auto-Load Toggle Row
 local AutoRow = Create("Frame", {
     BackgroundTransparency = 1,
-    Position = UDim2.fromOffset(9, 184),
+    Position = UDim2.fromOffset(9, 180),
     Size = UDim2.new(1, -18, 0, 18),
     ZIndex = 12,
     Parent = RightPanel,
@@ -773,8 +773,8 @@ end)
 local LoadBtn = Create("TextButton", {
     BackgroundColor3 = Color3.new(1, 1, 1),
     AutoButtonColor = false,
-    Position = UDim2.fromOffset(8, 214),
-    Size = UDim2.new(1, -16, 0, 50),
+    Position = UDim2.fromOffset(8, 206),
+    Size = UDim2.new(1, -16, 0, 58),
     Font = Enum.Font.GothamBold,
     Text = "LOAD SELECTED MODULE",
     TextColor3 = Color3.fromRGB(10, 10, 12),
