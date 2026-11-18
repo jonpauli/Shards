@@ -83,8 +83,8 @@ local GamesRegistry = {
         PlaceIds = { 114234929420007 },
         GameIds = { 7633926880 },
         Keywords = { "bloxstrike" },
-        LocalFile = "Example.lua",
-        RemoteUrl = "https://raw.githubusercontent.com/jonpauli/Shards/refs/heads/main/Example.lua",
+        LocalFile = "BloxStrike.lua",
+        RemoteUrl = "https://raw.githubusercontent.com/jonpauli/Shards/refs/heads/main/BloxStrike.lua",
         Features = {
             "PlaceId: 114234929420007",
             "5v5 Tactical & Zombies Support",
