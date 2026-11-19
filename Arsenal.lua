@@ -48,7 +48,7 @@ SilentGroup:AddToggle({ Name = "Enabled", Flag = "Silent_Enabled", Default = fal
 SilentGroup:AddSlider({ Name = "Hit Chance", Flag = "Silent_Chance", Min = 0, Max = 100, Default = 100, Rounding = 0, Suffix = "%" })
 SilentGroup:AddDropdown({ Name = "Target Bone", Flag = "Silent_Hitbox", List = {"Head", "UpperTorso", "HumanoidRootPart"}, Default = "Head" })
 
-local TriggerGroup = CombatTab:AddRightGroupbox("Triggerbot", "mouse-pointer")
+local TriggerGroup = CombatTab:AddLeftGroupbox("Triggerbot", "mouse-pointer")
 TriggerGroup:AddToggle({ Name = "Enabled", Flag = "Trigger_Enabled", Default = false })
     :AddKeybind({ Default = Enum.KeyCode.T, Mode = "Toggle", Flag = "Trigger_Bind" })
 TriggerGroup:AddSlider({ Name = "Delay", Flag = "Trigger_Delay", Min = 0, Max = 500, Default = 0, Rounding = 0, Suffix = "ms" })
@@ -183,7 +183,7 @@ local function GetTarget(hitboxFlag)
         local bone = GetChar(p):FindFirstChild(Library.Flags[hitboxFlag])
         if not bone then continue end
 
-        local pos, onScreen = Camera:WorldToViewportPoint(bone.Position)
+        local pos, onScreen = Camera:WorldToScreenPoint(bone.Position)
         if not onScreen then continue end
 
         if Library.Flags.Aim_VisCheck then
@@ -268,10 +268,10 @@ RunService.RenderStepped:Connect(function()
             local root = char.HumanoidRootPart
             local head = char.Head
             
-            local rootPos, onScreen = Camera:WorldToViewportPoint(root.Position)
+            local rootPos, onScreen = Camera:WorldToScreenPoint(root.Position)
             if onScreen then
-                local headPos = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 0.8, 0))
-                local footPos = Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 3.2, 0))
+                local headPos = Camera:WorldToScreenPoint(head.Position + Vector3.new(0, 0.8, 0))
+                local footPos = Camera:WorldToScreenPoint(root.Position - Vector3.new(0, 3.2, 0))
                 
                 local h = math.abs(headPos.Y - footPos.Y)
                 local w = h * 0.55
@@ -395,22 +395,20 @@ if hookmetamethod then
         local args = {...}
 
         if not checkcaller() and Library.Flags.Silent_Enabled then
-            if (method == "Raycast" or (type(method) == "string" and string.find(method, "FindPartOnRay"))) and self == Workspace then
+            if (method == "Raycast" or (type(method) == "string" and string.find(method, "FindPartOnRay"))) and tostring(self) == "Workspace" then
                 local target = GetTarget("Silent_Hitbox")
                 if target and math.random(1, 100) <= Library.Flags.Silent_Chance then
                     local bone = GetChar(target):FindFirstChild(Library.Flags.Silent_Hitbox)
                     if bone then
                         if method == "Raycast" then
-                            -- For Raycast: args[1] is origin, args[2] is direction
                             local origin = args[1]
-                            args[2] = (bone.Position - origin).Unit * 1000
-                            return OldNamecall(self, unpack(args))
+                            local dir = (bone.Position - origin).Unit * 1000
+                            return OldNamecall(self, origin, dir, args[3])
                         else
-                            -- For FindPartOnRay: args[1] is a Ray object
                             local origin = args[1].Origin
                             local dir = (bone.Position - origin).Unit * 1000
-                            args[1] = Ray.new(origin, dir)
-                            return OldNamecall(self, unpack(args))
+                            local newRay = Ray.new(origin, dir)
+                            return OldNamecall(self, newRay, args[2], args[3], args[4])
                         end
                     end
                 end
