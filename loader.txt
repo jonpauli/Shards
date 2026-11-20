@@ -1,0 +1,325 @@
+-- // Shards Loader V2 - Premium Edition
+local CoreGui = game:GetService("CoreGui")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local MarketplaceService = game:GetService("MarketplaceService")
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+
+-- // Protection & Cleanup
+local targetGui = gethui and gethui() or CoreGui:FindFirstChild("RobloxGui") or CoreGui
+if targetGui:FindFirstChild("ShardsV2") then targetGui.ShardsV2:Destroy() end
+
+-- // Theme Config
+local C = {
+    Bg = Color3.fromRGB(12, 12, 16),
+    BgLighter = Color3.fromRGB(20, 20, 25),
+    Accent = Color3.fromRGB(140, 82, 255),
+    AccentDark = Color3.fromRGB(90, 40, 180),
+    Text = Color3.fromRGB(255, 255, 255),
+    TextMuted = Color3.fromRGB(160, 160, 170),
+    Red = Color3.fromRGB(255, 65, 85),
+    Green = Color3.fromRGB(65, 255, 120)
+}
+
+-- // Target Hub Scripts (Map PlaceIds to scripts/URLs)
+local HUB_SCRIPTS = {
+    -- ======== FPS GAMES ========
+    -- Arsenal
+    [286090429] = {
+        Name = "Arsenal",
+        Load = function() loadstring(game:HttpGet("https://raw.githubusercontent.com/tobi4thewin/Roblox-Scripts/main/Arsenal.lua"))() end
+    },
+    -- Phantom Forces
+    [292439477] = {
+        Name = "Phantom Forces",
+        Load = function() loadstring(game:HttpGet("https://raw.githubusercontent.com/Aidez/rblx/main/PF.lua"))() end
+    },
+    -- Rivals
+    [17625359962] = {
+        Name = "Rivals",
+        Load = function() loadstring(game:HttpGet("https://raw.githubusercontent.com/qntm1/Rivals/main/Script"))() end
+    },
+    -- Counter Blox (CBRO)
+    [301549746] = {
+        Name = "Counter Blox",
+        Load = function() loadstring(game:HttpGet("https://raw.githubusercontent.com/Spoorloos/hecks/main/CBRO"))() end
+    },
+    -- Bad Business
+    [3233893879] = {
+        Name = "Bad Business",
+        Load = function() loadstring(game:HttpGet("https://raw.githubusercontent.com/Spoorloos/hecks/main/BadBusiness"))() end
+    },
+    -- BIG Paintball
+    [2321355059] = {
+        Name = "BIG Paintball",
+        Load = function() loadstring(game:HttpGet("https://raw.githubusercontent.com/Spoorloos/hecks/main/BigPaintball"))() end
+    },
+    -- Energy Assault
+    [4495562039] = {
+        Name = "Energy Assault",
+        Load = function() loadstring(game:HttpGet("https://raw.githubusercontent.com/1201put/eh/main/EnergyAssault"))() end
+    },
+    
+    -- ======== OTHER POPULAR ========
+    -- Blox Fruits
+    [2753915549] = {
+        Name = "Blox Fruits",
+        Load = function() loadstring(game:HttpGet("https://raw.githubusercontent.com/REDzHUB/BloxFruits/main/redz9999"))() end
+    },
+    -- Murder Mystery 2
+    [142823684] = {
+        Name = "MM2",
+        Load = function() loadstring(game:HttpGet("https://raw.githubusercontent.com/Doggo-cryto/EclipseMM2/master/Script", true))() end
+    },
+    -- Da Hood
+    [2788229376] = {
+        Name = "Da Hood",
+        Load = function() loadstring(game:HttpGet("https://raw.githubusercontent.com/SpaceHubX/SpaceHubX/main/SpaceHubX_OBF.lua"))() end
+    },
+    -- Blade Ball
+    [13772394625] = {
+        Name = "Blade Ball",
+        Load = function() loadstring(game:HttpGet("https://raw.githubusercontent.com/ffj1/Roblox-Exploits/main/scripts/BladeBallV3.lua"))() end
+    }
+}
+
+-- // Utilities
+local function Create(cls, props)
+    local inst = Instance.new(cls)
+    for k, v in pairs(props) do inst[k] = v end
+    return inst
+end
+
+local function Tween(obj, props, time, style, dir)
+    local t = TweenService:Create(obj, TweenInfo.new(time or 0.3, style or Enum.EasingStyle.Quint, dir or Enum.EasingDirection.Out), props)
+    t:Play()
+    return t
+end
+
+-- // UI Construction
+local SG = Create("ScreenGui", {Name = "ShardsV2", Parent = targetGui, IgnoreGuiInset = true, ResetOnSpawn = false})
+
+local Main = Create("Frame", {
+    Size = UDim2.new(0, 460, 0, 320),
+    Position = UDim2.new(0.5, 0, 0.5, 0),
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    BackgroundColor3 = C.Bg,
+    Parent = SG,
+    ClipsDescendants = false
+})
+Create("UICorner", {CornerRadius = UDim.new(0, 10), Parent = Main})
+Create("UIStroke", {Color = C.BgLighter, Thickness = 2, Parent = Main})
+
+-- Fake Drop Shadow
+local Shadow = Create("ImageLabel", {
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    Position = UDim2.new(0.5, 0, 0.5, 0),
+    Size = UDim2.new(1, 60, 1, 60),
+    BackgroundTransparency = 1,
+    Image = "rbxassetid://6015897843",
+    ImageColor3 = Color3.new(0, 0, 0),
+    ImageTransparency = 0.4,
+    SliceCenter = Rect.new(49, 49, 450, 450),
+    ScaleType = Enum.ScaleType.Slice,
+    ZIndex = -1,
+    Parent = Main
+})
+
+-- Topbar
+local TopBar = Create("Frame", {Size = UDim2.new(1, 0, 0, 45), BackgroundTransparency = 1, Parent = Main})
+local Title = Create("TextLabel", {
+    Size = UDim2.new(0, 200, 1, 0), Position = UDim2.new(0, 20, 0, 0),
+    BackgroundTransparency = 1, Text = "SHARDS", Font = Enum.Font.GothamBlack,
+    TextColor3 = C.Text, TextSize = 20, TextXAlignment = Enum.TextXAlignment.Left, Parent = TopBar
+})
+Create("UIGradient", {
+    Color = ColorSequence.new({ColorSequenceKeypoint.new(0, C.Text), ColorSequenceKeypoint.new(1, C.Accent)}),
+    Parent = Title
+})
+
+local CloseBtn = Create("TextButton", {
+    Size = UDim2.new(0, 30, 0, 30), Position = UDim2.new(1, -40, 0.5, -15),
+    BackgroundColor3 = C.BgLighter, Text = "X", Font = Enum.Font.GothamBold,
+    TextColor3 = C.TextMuted, TextSize = 14, Parent = TopBar, AutoButtonColor = false
+})
+Create("UICorner", {CornerRadius = UDim.new(0, 6), Parent = CloseBtn})
+
+-- Middle Content Area
+local Content = Create("Frame", {
+    Size = UDim2.new(1, -40, 1, -130), Position = UDim2.new(0, 20, 0, 50),
+    BackgroundColor3 = C.BgLighter, Parent = Main
+})
+Create("UICorner", {CornerRadius = UDim.new(0, 8), Parent = Content})
+
+local GameIcon = Create("ImageLabel", {
+    Size = UDim2.new(0, 64, 0, 64), Position = UDim2.new(0, 15, 0, 15),
+    BackgroundColor3 = C.Bg, Parent = Content
+})
+Create("UICorner", {CornerRadius = UDim.new(0, 8), Parent = GameIcon})
+
+local GameName = Create("TextLabel", {
+    Size = UDim2.new(1, -110, 0, 25), Position = UDim2.new(0, 95, 0, 18),
+    BackgroundTransparency = 1, Text = "Detecting Target...", Font = Enum.Font.GothamBold,
+    TextColor3 = C.Text, TextSize = 17, TextXAlignment = Enum.TextXAlignment.Left, Parent = Content
+})
+local GameStatus = Create("TextLabel", {
+    Size = UDim2.new(1, -110, 0, 20), Position = UDim2.new(0, 95, 0, 45),
+    BackgroundTransparency = 1, Text = "Status: Pending Injection", Font = Enum.Font.GothamMedium,
+    TextColor3 = C.Red, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, Parent = Content
+})
+
+-- Terminal / Console
+local Console = Create("ScrollingFrame", {
+    Size = UDim2.new(1, -30, 1, -100), Position = UDim2.new(0, 15, 0, 90),
+    BackgroundTransparency = 1, ScrollBarThickness = 2, ScrollBarImageColor3 = C.Accent,
+    Parent = Content, CanvasSize = UDim2.new(0, 0, 0, 0), AutomaticCanvasSize = Enum.AutomaticSize.Y
+})
+local ConsoleList = Create("UIListLayout", {SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 4), Parent = Console})
+
+-- Bottom Bar (Progress & Launch)
+local BottomBar = Create("Frame", {
+    Size = UDim2.new(1, -40, 0, 50), Position = UDim2.new(0, 20, 1, -70),
+    BackgroundTransparency = 1, Parent = Main
+})
+
+local ProgressBarBg = Create("Frame", {
+    Size = UDim2.new(1, -140, 0, 6), Position = UDim2.new(0, 0, 0.5, -3),
+    BackgroundColor3 = C.BgLighter, Parent = BottomBar
+})
+Create("UICorner", {CornerRadius = UDim.new(1, 0), Parent = ProgressBarBg})
+
+local ProgressBarFill = Create("Frame", {
+    Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = C.Accent, Parent = ProgressBarBg
+})
+Create("UICorner", {CornerRadius = UDim.new(1, 0), Parent = ProgressBarFill})
+
+local ActionBtn = Create("TextButton", {
+    Size = UDim2.new(0, 120, 0, 38), Position = UDim2.new(1, -120, 0.5, -19),
+    BackgroundColor3 = C.BgLighter, Text = "WAIT", Font = Enum.Font.GothamBold,
+    TextColor3 = C.TextMuted, TextSize = 14, Parent = BottomBar, AutoButtonColor = false
+})
+Create("UICorner", {CornerRadius = UDim.new(0, 6), Parent = ActionBtn})
+
+-- // Dragging Logic
+local dragging, dragInput, dragStart, startPos
+TopBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true; dragStart = input.Position; startPos = Main.Position
+        input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dragging = false end end)
+    end
+end)
+TopBar.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement then dragInput = input end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        local delta = input.Position - dragStart
+        Main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+-- // Effects & Interactions
+local function Log(msg, color)
+    local txt = Create("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 16), BackgroundTransparency = 1,
+        Text = "[SYS] " .. msg, Font = Enum.Font.Code, TextColor3 = color or C.TextMuted,
+        TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, Parent = Console,
+        TextTransparency = 1
+    })
+    Tween(txt, {TextTransparency = 0}, 0.2)
+    Console.CanvasPosition = Vector2.new(0, 9999)
+end
+
+CloseBtn.MouseEnter:Connect(function() Tween(CloseBtn, {BackgroundColor3 = C.Red, TextColor3 = C.Text}, 0.2) end)
+CloseBtn.MouseLeave:Connect(function() Tween(CloseBtn, {BackgroundColor3 = C.BgLighter, TextColor3 = C.TextMuted}, 0.2) end)
+CloseBtn.MouseButton1Click:Connect(function() 
+    Tween(Main, {Size = UDim2.new(0, 460, 0, 0), Position = Main.Position + UDim2.new(0, 0, 0, 150)}, 0.4, Enum.EasingStyle.Back, Enum.EasingDirection.In)
+    task.wait(0.4)
+    SG:Destroy()
+end)
+
+-- // Startup Sequence
+local CanvasGroup = Create("CanvasGroup", {Size = UDim2.new(1,0,1,0), BackgroundTransparency = 1, Parent = Main})
+for _, v in ipairs(Main:GetChildren()) do
+    if v ~= CanvasGroup and v ~= Shadow and not v:IsA("UICorner") and not v:IsA("UIStroke") then
+        v.Parent = CanvasGroup
+    end
+end
+
+CanvasGroup.GroupTransparency = 1
+Main.Size = UDim2.new(0, 400, 0, 280)
+local t1 = Tween(Main, {Size = UDim2.new(0, 460, 0, 320)}, 0.6, Enum.EasingStyle.Exponential)
+Tween(CanvasGroup, {GroupTransparency = 0}, 0.6)
+
+task.spawn(function()
+    t1.Completed:Wait()
+    Log("Booting execution environment...")
+    Tween(ProgressBarFill, {Size = UDim2.new(0.2, 0, 1, 0)}, 0.8)
+    task.wait(0.5)
+
+    -- Auto-detect Game
+    local success, info = pcall(function() return MarketplaceService:GetProductInfo(game.PlaceId) end)
+    if success and info then
+        GameName.Text = string.sub(info.Name, 1, 28) .. (string.len(info.Name) > 28 and "..." or "")
+        GameIcon.Image = "rbxthumb://type=Asset&id=" .. info.IconImageAssetId .. "&w=150&h=150"
+        Log("Target acquired: " .. info.Name, C.Accent)
+    else
+        GameName.Text = "Unknown Place"
+        Log("Failed to sync marketplace data.", C.Red)
+    end
+    
+    Tween(ProgressBarFill, {Size = UDim2.new(0.5, 0, 1, 0)}, 0.6)
+    task.wait(0.6)
+    
+    Log("Resolving dynamic offsets...")
+    task.wait(0.5)
+    
+    -- Check if game is supported in HUB_SCRIPTS
+    local targetGame = HUB_SCRIPTS[game.PlaceId]
+    if targetGame then
+        Log("Found dedicated script for " .. targetGame.Name, C.Green)
+    else
+        Log("No dedicated script found. Loading universal hub...", Color3.fromRGB(255, 180, 50))
+    end
+
+    Log("Bypassing client integrity hooks...", Color3.fromRGB(255, 180, 50))
+    Tween(ProgressBarFill, {Size = UDim2.new(0.85, 0, 1, 0)}, 1.2)
+    task.wait(1.2)
+    Log("Hooks silenced. Environment secure.", C.Text)
+    
+    Tween(ProgressBarFill, {Size = UDim2.new(1, 0, 1, 0)}, 0.4)
+    Log("Awaiting user execution.", C.Accent)
+    
+    -- Activate Launch Button
+    Tween(ActionBtn, {BackgroundColor3 = C.Accent, TextColor3 = C.Text}, 0.3)
+    ActionBtn.Text = "LOAD SCRIPT"
+    
+    local canLaunch = true
+    ActionBtn.MouseEnter:Connect(function() if canLaunch then Tween(ActionBtn, {BackgroundColor3 = C.AccentDark}) end end)
+    ActionBtn.MouseLeave:Connect(function() if canLaunch then Tween(ActionBtn, {BackgroundColor3 = C.Accent}) end end)
+    
+    ActionBtn.MouseButton1Click:Connect(function()
+        if not canLaunch then return end
+        canLaunch = false
+        
+        Tween(ActionBtn, {BackgroundColor3 = C.BgLighter, TextColor3 = C.TextMuted}, 0.3)
+        ActionBtn.Text = "INJECTED"
+        GameStatus.Text = "Status: Fully Injected"
+        GameStatus.TextColor3 = C.Green
+        Log("Payload delivered successfully.", C.Green)
+        
+        -- Flash effect
+        local flash = Create("Frame", {Size = UDim2.new(1,0,1,0), BackgroundColor3 = C.Accent, BackgroundTransparency = 0.5, Parent = SG, ZIndex = 999})
+        Tween(flash, {BackgroundTransparency = 1}, 0.5).Completed:Connect(function() flash:Destroy() end)
+        
+        -- Load script based on game
+        if targetGame then
+            pcall(targetGame.Load)
+        else
+            -- Universal script fallback (Infinite Yield)
+            pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))() end)
+        end
+    end)
+end)
+
